@@ -20,14 +20,22 @@ var (
 	startWorkTime time.Time
 	srv           *sheets.Service
 	spreadsheetID string
+	bot           *tgbotapi.BotAPI
 )
 
 func main() {
-	// Завантаження змінних оточення
+	// Завантаження .env
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Помилка завантаження .env файлу")
 	}
+
+	// Встановлення часового поясу на Київ
+	location, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		log.Fatal("Не вдалося завантажити часову зону Europe/Kyiv")
+	}
+	time.Local = location
 
 	botToken := os.Getenv("TELEGRAM_TOKEN")
 	spreadsheetID = os.Getenv("SPREADSHEET_ID")
@@ -37,7 +45,7 @@ func main() {
 	}
 
 	// Підключення до Telegram
-	bot, err := tgbotapi.NewBotAPI(botToken)
+	bot, err = tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,65 +88,108 @@ func main() {
 			continue
 		}
 
-		switch update.Message.Text {
-		case "Почати роботу":
-			startWorkTime = time.Now()
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Роботу розпочато!")
-			bot.Send(msg)
-
-		case "Закінчити роботу":
-			if startWorkTime.IsZero() {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Спочатку потрібно натиснути «Почати роботу»!")
-				bot.Send(msg)
-				continue
-			}
-
-			endWorkTime := time.Now()
-			duration := endWorkTime.Sub(startWorkTime)
-			hours := int(duration.Hours())
-			minutes := int(duration.Minutes()) % 60
-			durationStr := strings.TrimSpace(
-				strings.Join([]string{
-					func() string {
-						if hours > 0 {
-							return strconv.Itoa(hours) + " год"
-						}
-						return ""
-					}(),
-					func() string {
-						if minutes > 0 {
-							return strconv.Itoa(minutes) + " хв"
-						}
-						return ""
-					}(),
-				}, " "),
-			)
-
-			writeRow("Робочі сесії", []interface{}{
-				startWorkTime.Format("02.01.2006 15:04"),
-				endWorkTime.Format("02.01.2006 15:04"),
-				durationStr,
-				"Робочий",
-			})
-
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
-			bot.Send(msg)
-
-			startWorkTime = time.Time{}
-
-		case "Вихідний день":
-			writeRow("Робочі сесії", []interface{}{
-				"", "", "", "Вихідний",
-			})
-
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Вихідний день записано!")
-			bot.Send(msg)
-
-		default:
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Будь ласка, використовуйте кнопки!")
-			bot.Send(msg)
+		if update.Message.IsCommand() {
+			handleCommand(update.Message)
+			continue
 		}
+
+		handleButton(update.Message)
 	}
+}
+
+func handleCommand(message *tgbotapi.Message) {
+	switch message.Command() {
+	case "почати_роботу":
+		startWork(message)
+	case "завершити_роботу":
+		finishWork(message)
+	case "вихідний":
+		registerDayOff(message)
+	default:
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Команда не знайдена. Використовуйте кнопки.")
+		bot.Send(msg)
+	}
+}
+
+func handleButton(message *tgbotapi.Message) {
+	switch message.Text {
+	case "Почати роботу":
+		startWork(message)
+	case "Закінчити роботу":
+		finishWork(message)
+	case "Вихідний день":
+		registerDayOff(message)
+	default:
+		showMainKeyboard(message.Chat.ID)
+	}
+}
+
+func startWork(message *tgbotapi.Message) {
+	startWorkTime = time.Now()
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу розпочато!")
+	bot.Send(msg)
+}
+
+func finishWork(message *tgbotapi.Message) {
+	if startWorkTime.IsZero() {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Спочатку потрібно натиснути «Почати роботу»!")
+		bot.Send(msg)
+		return
+	}
+
+	endWorkTime := time.Now()
+	duration := endWorkTime.Sub(startWorkTime)
+	hours := int(duration.Hours())
+	minutes := int(duration.Minutes()) % 60
+	durationStr := strings.TrimSpace(
+		strings.Join([]string{
+			func() string {
+				if hours > 0 {
+					return strconv.Itoa(hours) + " год"
+				}
+				return ""
+			}(),
+			func() string {
+				if minutes > 0 {
+					return strconv.Itoa(minutes) + " хв"
+				}
+				return ""
+			}(),
+		}, " "),
+	)
+
+	writeRow("Робочі сесії", []interface{}{
+		startWorkTime.Format("02.01.2006 15:04"),
+		endWorkTime.Format("02.01.2006 15:04"),
+		durationStr,
+		"Робочий",
+	})
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
+	bot.Send(msg)
+
+	startWorkTime = time.Time{}
+}
+
+func registerDayOff(message *tgbotapi.Message) {
+	writeRow("Робочі сесії", []interface{}{
+		"", "", "", "Вихідний",
+	})
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день записано!")
+	bot.Send(msg)
+}
+
+func showMainKeyboard(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
+	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Почати роботу"),
+			tgbotapi.NewKeyboardButton("Закінчити роботу"),
+			tgbotapi.NewKeyboardButton("Вихідний день"),
+		),
+	)
+	bot.Send(msg)
 }
 
 func writeRow(sheetName string, values []interface{}) {
