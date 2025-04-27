@@ -1,147 +1,140 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"time"
+	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
 
-type Update struct {
-	UpdateID int      `json:"update_id"`
-	Message  *Message `json:"message"`
-}
-
-type Message struct {
-	MessageID int    `json:"message_id"`
-	From      *User  `json:"from"`
-	Chat      *Chat  `json:"chat"`
-	Date      int    `json:"date"`
-	Text      string `json:"text"`
-}
-
-type User struct {
-	ID        int    `json:"id"`
-	Username  string `json:"username"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-}
-
-type Chat struct {
-	ID    int64  `json:"id"`
-	Type  string `json:"type"`
-	Title string `json:"title"`
-}
+var (
+	startWorkTime time.Time
+	srv           *sheets.Service
+	spreadsheetID string
+	sheetName     string
+)
 
 func main() {
-	_ = godotenv.Load()
-
-	token := os.Getenv("TELEGRAM_TOKEN")
-	spreadsheetID := os.Getenv("SPREADSHEET_ID")
-	sheetName := os.Getenv("SHEET_NAME")
-	if token == "" || spreadsheetID == "" {
-		log.Fatal("TELEGRAM_TOKEN або SPREADSHEET_ID не встановлені")
-	}
-	if sheetName == "" {
-		sheetName = "Sheet1"
-	}
-
-	ctx := context.Background()
-	credData, err := ioutil.ReadFile("credentials.json")
+	// Завантаження змінних середовища
+	err := godotenv.Load()
 	if err != nil {
-		log.Fatalf("Не вдалося прочитати credentials.json: %v", err)
+		log.Fatal("Помилка завантаження .env файлу")
 	}
-	config, err := google.JWTConfigFromJSON(credData, sheets.SpreadsheetsScope)
+
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	spreadsheetID = os.Getenv("SPREADSHEET_ID")
+	sheetName = os.Getenv("SHEET_NAME")
+
+	if botToken == "" || chatID == "" || spreadsheetID == "" || sheetName == "" {
+		log.Fatal("Одне або кілька середовищних змінних не встановлено")
+	}
+
+	// Підключення до Telegram
+	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		log.Fatalf("Помилка аутентифікації Google Sheets: %v", err)
+		log.Fatal(err)
 	}
-	googleClient := config.Client(ctx)
-	sheetsService, err := sheets.NewService(ctx, option.WithHTTPClient(googleClient))
+
+	// Підключення до Google Sheets
+	credsData, err := os.ReadFile("internal/credentials.json")
 	if err != nil {
-		log.Fatalf("Не вдалося створити клієнта Google Sheets: %v", err)
+		log.Fatalf("Не знайдено файл credentials.json: %v", err)
+	}
+	config, err := google.JWTConfigFromJSON(credsData, sheets.SpreadsheetsScope)
+	if err != nil {
+		log.Fatalf("Помилка створення конфігурації: %v", err)
+	}
+	client := config.Client(oauth2.NoContext)
+	srv, err = sheets.NewService(oauth2.NoContext, option.WithHTTPClient(client))
+	if err != nil {
+		log.Fatalf("Помилка підключення до Google Sheets: %v", err)
 	}
 
-	keyboard := map[string]interface{}{
-		"keyboard": [][]map[string]string{
-			{{"text": "Почати роботу"}, {"text": "Закінчити роботу"}},
-			{{"text": "Вихідний день"}},
-		},
-		"resize_keyboard":  true,
-		"one_time_keyboard": false,
-	}
+	// Налаштування Telegram обробника
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
 
-	telegramAPI := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
+	updates := bot.GetUpdatesChan(u)
 
-	app := fiber.New()
-
-	app.Post("/webhook", func(c *fiber.Ctx) error {
-		var update Update
-		if err := json.Unmarshal(c.Body(), &update); err != nil {
-			log.Printf("Помилка розбору оновлення: %v", err)
-			return c.SendStatus(fiber.StatusBadRequest)
+	for update := range updates {
+		if update.Message == nil {
+			continue
 		}
 
-		if update.Message != nil {
-			msg := update.Message
-			chatID := msg.Chat.ID
-			text := msg.Text
-			user := msg.From
+		switch update.Message.Text {
+		case "Почати роботу":
+			startWorkTime = time.Now()
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Роботу розпочато!")
+			bot.Send(msg)
 
-			name := user.FirstName
-			if user.LastName != "" {
-				name += " " + user.LastName
-			}
-			if user.Username != "" {
-				name = "@" + user.Username
-			}
-
-			log.Printf("Отримано повідомлення від %s: %s", name, text)
-
-			responseText := ""
-			switch text {
-			case "/start":
-				responseText = "Вітаю! Оберіть дію на клавіатурі:"
-			case "Почати роботу", "Закінчити роботу", "Вихідний день":
-				timestamp := time.Now().Format("2006-01-02 15:04:05")
-				row := []interface{}{timestamp, name, text}
-				vr := &sheets.ValueRange{
-					Values: [][]interface{}{row},
-				}
-				_, err := sheetsService.Spreadsheets.Values.Append(spreadsheetID, sheetName+"!A:C", vr).ValueInputOption("RAW").Do()
-				if err != nil {
-					log.Printf("Помилка запису в Google Sheets: %v", err)
-					responseText = "Помилка запису даних."
-				} else {
-					responseText = "✅ Дані збережено: " + text
-				}
-			default:
-				responseText = "Невідома команда. Використовуйте кнопки!"
+		case "Закінчити роботу":
+			if startWorkTime.IsZero() {
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Спочатку потрібно натиснути «Почати роботу»!")
+				bot.Send(msg)
+				continue
 			}
 
-			payload := map[string]interface{}{
-				"chat_id": chatID,
-				"text":    responseText,
-			}
-			if text == "/start" {
-				payload["reply_markup"] = keyboard
-			}
-			payloadBytes, _ := json.Marshal(payload)
-			http.Post(telegramAPI, "application/json", bytes.NewBuffer(payloadBytes))
+			endWorkTime := time.Now()
+			duration := endWorkTime.Sub(startWorkTime)
+			hours := int(duration.Hours())
+			minutes := int(duration.Minutes()) % 60
+			durationStr := strings.TrimSpace(
+				strings.Join([]string{
+					func() string {
+						if hours > 0 {
+							return strconv.Itoa(hours) + " год"
+						}
+						return ""
+					}(),
+					func() string {
+						if minutes > 0 {
+							return strconv.Itoa(minutes) + " хв"
+						}
+						return ""
+					}(),
+				}, " "),
+			)
+
+			writeRow([]interface{}{
+				startWorkTime.Format("02.01.2006 15:04"),
+				endWorkTime.Format("02.01.2006 15:04"),
+				durationStr,
+				"Робочий",
+			})
+
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
+			bot.Send(msg)
+
+			// Обнуляємо старт
+			startWorkTime = time.Time{}
+
+		case "Вихідний день":
+			writeRow([]interface{}{
+				"", "", "", "Вихідний",
+			})
+
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Вихідний день записано!")
+			bot.Send(msg)
+
+		default:
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Будь ласка, використовуйте кнопки!")
+			bot.Send(msg)
 		}
+	}
+}
 
-		return c.SendStatus(http.StatusOK)
-	})
-
-	log.Fatal(app.ListenTLS(":443", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem"))
+func writeRow(values []interface{}) {
+	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName+"!A:D", &sheets.ValueRange{
+		Values: [][]interface{}{values},
+	}).ValueInputOption("USER_ENTERED").Do()
+	if err != nil {
+		log.Printf("Помилка запису в Google Sheets: %v", err)
+	}
 }
