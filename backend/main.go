@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 	"strings"
+	"strconv"
 
 	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -17,27 +18,31 @@ var (
 	startWorkTime time.Time
 	srv           *sheets.Service
 	spreadsheetID string
-	sheetName     string
 )
 
 func main() {
-	// Завантаження змінних середовища
+	// Завантаження .env
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Помилка завантаження .env файлу")
 	}
 
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	chatID := os.Getenv("TELEGRAM_CHAT_ID")
+	botToken := os.Getenv("TELEGRAM_TOKEN")
 	spreadsheetID = os.Getenv("SPREADSHEET_ID")
-	sheetName = os.Getenv("SHEET_NAME")
 
-	if botToken == "" || chatID == "" || spreadsheetID == "" || sheetName == "" {
-		log.Fatal("Одне або кілька середовищних змінних не встановлено")
+	if botToken == "" || spreadsheetID == "" {
+		log.Fatal("TELEGRAM_TOKEN або SPREADSHEET_ID не встановлені")
 	}
 
 	// Підключення до Telegram
 	bot, err := tgbotapi.NewBotAPI(botToken)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Встановлюємо webhook
+	webhookURL := "https://vadymnewchapter.pp.ua/webhook"
+	_, err = bot.Request(tgbotapi.NewWebhook(webhookURL))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -57,11 +62,12 @@ func main() {
 		log.Fatalf("Помилка підключення до Google Sheets: %v", err)
 	}
 
-	// Налаштування Telegram обробника
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
+	updates := bot.ListenForWebhook("/webhook")
+	go func() {
+		log.Fatal(http.ListenAndServeTLS(":443", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem", nil))
+	}()
 
-	updates := bot.GetUpdatesChan(u)
+	log.Println("Бот запущено!")
 
 	for update := range updates {
 		if update.Message == nil {
@@ -102,7 +108,7 @@ func main() {
 				}, " "),
 			)
 
-			writeRow([]interface{}{
+			writeRow("Робочі сесії", []interface{}{
 				startWorkTime.Format("02.01.2006 15:04"),
 				endWorkTime.Format("02.01.2006 15:04"),
 				durationStr,
@@ -112,11 +118,10 @@ func main() {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
 			bot.Send(msg)
 
-			// Обнуляємо старт
 			startWorkTime = time.Time{}
 
 		case "Вихідний день":
-			writeRow([]interface{}{
+			writeRow("Робочі сесії", []interface{}{
 				"", "", "", "Вихідний",
 			})
 
@@ -130,7 +135,7 @@ func main() {
 	}
 }
 
-func writeRow(values []interface{}) {
+func writeRow(sheetName string, values []interface{}) {
 	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName+"!A:D", &sheets.ValueRange{
 		Values: [][]interface{}{values},
 	}).ValueInputOption("USER_ENTERED").Do()
