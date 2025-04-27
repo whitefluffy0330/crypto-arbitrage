@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"time"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -21,7 +23,7 @@ var (
 )
 
 func main() {
-	// Завантаження .env
+	// Завантаження змінних оточення
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Помилка завантаження .env файлу")
@@ -42,7 +44,8 @@ func main() {
 
 	// Встановлюємо webhook
 	webhookURL := "https://vadymnewchapter.pp.ua/webhook"
-	_, err = bot.Request(tgbotapi.NewWebhook(webhookURL))
+	wh, _ := tgbotapi.NewWebhook(webhookURL)
+	_, err = bot.Request(wh)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,10 +67,13 @@ func main() {
 
 	updates := bot.ListenForWebhook("/webhook")
 	go func() {
-		log.Fatal(http.ListenAndServeTLS(":443", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem", nil))
+		log.Fatal(http.ListenAndServeTLS(":443",
+			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem",
+			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem",
+			nil))
 	}()
 
-	log.Println("Бот запущено!")
+	log.Println("Бот запущено та слухає HTTPS!")
 
 	for update := range updates {
 		if update.Message == nil {
