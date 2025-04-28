@@ -185,7 +185,6 @@ func sendStartKeyboard(chatID int64) {
 	)
 	bot.Send(msg)
 }
-return
 
 if tempGoalAmount == "" {
     tempGoalAmount = message.Text
