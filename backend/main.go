@@ -344,10 +344,8 @@ func morningReport() {
 			msg := tgbotapi.NewMessage(chatID, reportText)
 			bot.Send(msg)
 		}
-
-		func handleGoalCreation(message *tgbotapi.Message) {
-    // Поки що заглушка, бо створення цілей зараз тимчасово не пріоритет
+func handleGoalCreation(message *tgbotapi.Message) {
+    // Тимчасова заглушка
 }
 
-	}
-}
+
