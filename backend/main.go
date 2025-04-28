@@ -322,7 +322,7 @@ func handleCallback(query *tgbotapi.CallbackQuery) {
 			isBreakRequested = false
 			bot.Send(tgbotapi.NewMessage(query.Message.Chat.ID, "Чудово! Повертаємось до роботи! 🚀"))
 		} else {
-			bot.Send(tgbotapi.NewMessage(query.Message.Chat.ID, "Спочатку натисни «Ок, йду відпочивати»!"))
+			bot.Send(tgbotapi.NewMessage(query.Message.Chat.ID, "Спочатку натисни \"Ок, йду відпочивати\"!"))
 		}
 	}
 	bot.Request(tgbotapi.NewCallback(query.ID, ""))
