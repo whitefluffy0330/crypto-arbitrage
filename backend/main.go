@@ -361,5 +361,6 @@ func morningReport() {
 			bot.Send(msg)
 		bot.Request(tgbotapi.NewCallback(query.ID, ""))
 }
+		
 }
 	
