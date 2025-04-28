@@ -21,6 +21,7 @@ var (
 	srv           *sheets.Service
 	spreadsheetID string
 	bot           *tgbotapi.BotAPI
+	chatID        int64
 )
 
 func main() {
@@ -83,10 +84,14 @@ func main() {
 
 	log.Println("Бот запущено та слухає HTTPS!")
 
+	go morningReport()
+
 	for update := range updates {
 		if update.Message == nil {
 			continue
 		}
+
+		chatID = update.Message.Chat.ID
 
 		if update.Message.IsCommand() {
 			handleCommand(update.Message)
@@ -199,4 +204,51 @@ func writeRow(sheetName string, values []interface{}) {
 	if err != nil {
 		log.Printf("Помилка запису в Google Sheets: %v", err)
 	}
+}
+
+func morningReport() {
+	for {
+		now := time.Now()
+		nextReport := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+		if now.After(nextReport) {
+			nextReport = nextReport.Add(24 * time.Hour)
+		}
+		duration := nextReport.Sub(now)
+		time.Sleep(duration)
+
+		if chatID != 0 {
+			sendMorningReport()
+		}
+	}
+}
+
+func sendMorningReport() {
+	readRange := "Робочі сесії!A:D"
+	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
+	if err != nil {
+		log.Printf("Помилка читання Google Sheets: %v", err)
+		return
+	}
+
+	if len(resp.Values) < 2 {
+		log.Println("Недостатньо даних у таблиці.")
+		return
+	}
+
+	// Беремо передостанній рядок
+	lastRow := resp.Values[len(resp.Values)-2]
+	var reportText string
+
+	if len(lastRow) >= 4 {
+		if lastRow[3] == "Вихідний" {
+			reportText = "Учора був вихідний день. Відпочинок — це частина успіху! 🔥"
+		} else {
+			reportText = "Учора ти пропрацював: " + lastRow[2].(string) + ". Чудова робота! 💪"
+		}
+	} else {
+		reportText = "Немає даних за вчорашній день."
+	}
+
+	msg := tgbotapi.NewMessage(chatID, reportText)
+	bot.Send(msg)
 }
