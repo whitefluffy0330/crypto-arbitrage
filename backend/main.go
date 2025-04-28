@@ -362,7 +362,7 @@ func morningReport() {
 		}
 	}
 }
-вати»!"))
+
 		}
 	}
 	bot.Request(tgbotapi.NewCallback(query.ID, ""))
