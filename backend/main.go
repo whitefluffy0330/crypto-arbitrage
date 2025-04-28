@@ -33,8 +33,8 @@ var (
 )
 
 const (
-	workSheet  = "Робочі сесії"
-	goalSheet  = "Цілі"
+	workSheet   = "Робочі сесії"
+	goalSheet   = "Цілі"
 	incomeSheet = "Мапа доходу"
 )
 
@@ -117,7 +117,6 @@ func main() {
 		}
 	}
 }
-
 func handleCommand(message *tgbotapi.Message) {
 	switch message.Command() {
 	case "почати_роботу":
@@ -183,7 +182,6 @@ func registerDayOff(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день записано!")
 	bot.Send(msg)
 }
-
 func handleProfitEntry(message *tgbotapi.Message) {
 	waitingProfit = false
 	profit, err := strconv.ParseFloat(message.Text, 64)
@@ -251,6 +249,31 @@ func profitTimeoutChecker(chatID int64) {
 	}
 }
 
+func handleGoalCreation(message *tgbotapi.Message) {
+	switch goalState {
+	case "waiting_goal_name":
+		tempGoalName = message.Text
+		goalState = "waiting_goal_amount"
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Введи суму цілі ($):"))
+	case "waiting_goal_amount":
+		tempGoalAmount = message.Text
+		if _, err := strconv.ParseFloat(tempGoalAmount, 64); err != nil {
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Будь ласка, введи суму в числовому форматі."))
+			return
+		}
+		writeRow(goalSheet, []interface{}{tempGoalName, tempGoalAmount})
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ціль додано успішно! 🚀"))
+		goalState = ""
+	}
+}
+
+func writeRow(sheetName string, values []interface{}) {
+	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName+"!A:D", &sheets.ValueRange{Values: [][]interface{}{values}}).ValueInputOption("USER_ENTERED").Do()
+	if err != nil {
+		log.Printf("Помилка запису в Google Sheets: %v", err)
+	}
+}
+
 func showMainKeyboard(chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -260,13 +283,6 @@ func showMainKeyboard(chatID int64) {
 			tgbotapi.NewKeyboardButton("Вихідний день")),
 	)
 	bot.Send(msg)
-}
-
-func writeRow(sheetName string, values []interface{}) {
-	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName+"!A:D", &sheets.ValueRange{Values: [][]interface{}{values}}).ValueInputOption("USER_ENTERED").Do()
-	if err != nil {
-		log.Printf("Помилка запису в Google Sheets: %v", err)
-	}
 }
 
 func startBreakTimer(chatID int64) {
@@ -313,44 +329,36 @@ func handleCallback(query *tgbotapi.CallbackQuery) {
 }
 
 func morningReport() {
-    for {
-        now := time.Now()
-        nextReport := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
-        if now.After(nextReport) {
-            nextReport = nextReport.Add(24 * time.Hour)
-        }
-        time.Sleep(nextReport.Sub(now))
-
-        if chatID != 0 {
-            readRange := workSheet + "!A:D"
-            resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
-            if err != nil {
-                log.Printf("Помилка читання Google Sheets: %v", err)
-                continue
-            }
-            if len(resp.Values) < 2 {
-                continue
-            }
-            lastRow := resp.Values[len(resp.Values)-2]
-            var reportText string
-            if len(lastRow) >= 4 {
-                if lastRow[3] == "Вихідний" {
-                    reportText = "Учора був вихідний день. Відпочинок – теж успіх! 🔥"
-                } else {
-                    reportText = "Учора ти пропрацював: " + lastRow[2].(string) + ". Чудова робота! 💪"
-                }
-            } else {
-                reportText = "Немає даних за вчорашній день."
-            }
-            msg := tgbotapi.NewMessage(chatID, reportText)
-            bot.Send(msg)
-        }
-    }
-}
-
-// ПРАВИЛЬНЕ ЗАКРИТТЯ попередньої функції!
-// І тепер нова функція:
-
-func handleGoalCreation(message *tgbotapi.Message) {
-    // Тимчасова заглушка, поки не реалізована повна логіка
+	for {
+		now := time.Now()
+		nextReport := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+		if now.After(nextReport) {
+			nextReport = nextReport.Add(24 * time.Hour)
+		}
+		time.Sleep(nextReport.Sub(now))
+		if chatID != 0 {
+			readRange := workSheet + "!A:D"
+			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
+			if err != nil {
+				log.Printf("Помилка читання Google Sheets: %v", err)
+				continue
+			}
+			if len(resp.Values) < 2 {
+				continue
+			}
+			lastRow := resp.Values[len(resp.Values)-2]
+			var reportText string
+			if len(lastRow) >= 4 {
+				if lastRow[3] == "Вихідний" {
+					reportText = "Учора був вихідний день. Відпочинок — теж успіх! 🔥"
+				} else {
+					reportText = "Учора ти пропрацював: " + lastRow[2].(string) + ". Чудова робота! 💪"
+				}
+			} else {
+				reportText = "Немає даних за вчорашній день."
+			}
+			msg := tgbotapi.NewMessage(chatID, reportText)
+			bot.Send(msg)
+		}
+	}
 }
