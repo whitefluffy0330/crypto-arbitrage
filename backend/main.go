@@ -2,11 +2,12 @@ package main
 
 import (
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
-	"time"
-	"strings"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -17,11 +18,13 @@ import (
 )
 
 var (
-	startWorkTime time.Time
-	srv           *sheets.Service
-	spreadsheetID string
-	bot           *tgbotapi.BotAPI
-	chatID        int64
+	startWorkTime     time.Time
+	srv               *sheets.Service
+	spreadsheetID     string
+	bot               *tgbotapi.BotAPI
+	chatID            int64
+	isWorking         bool
+	isBreakRequested  bool
 )
 
 func main() {
@@ -31,7 +34,6 @@ func main() {
 		log.Fatal("Помилка завантаження .env файлу")
 	}
 
-	// Встановлення часового поясу на Київ
 	location, err := time.LoadLocation("Europe/Kyiv")
 	if err != nil {
 		log.Fatal("Не вдалося завантажити часову зону Europe/Kyiv")
@@ -45,13 +47,11 @@ func main() {
 		log.Fatal("TELEGRAM_TOKEN або SPREADSHEET_ID не встановлені")
 	}
 
-	// Підключення до Telegram
 	bot, err = tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Встановлюємо webhook
 	webhookURL := "https://vadymnewchapter.pp.ua/webhook"
 	wh, _ := tgbotapi.NewWebhook(webhookURL)
 	_, err = bot.Request(wh)
@@ -59,7 +59,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Підключення до Google Sheets
 	credsData, err := os.ReadFile("internal/credentials.json")
 	if err != nil {
 		log.Fatalf("Не знайдено файл credentials.json: %v", err)
@@ -87,18 +86,19 @@ func main() {
 	go morningReport()
 
 	for update := range updates {
-		if update.Message == nil {
-			continue
+		if update.Message != nil {
+			chatID = update.Message.Chat.ID
+
+			if update.Message.IsCommand() {
+				handleCommand(update.Message)
+				continue
+			}
+			handleButton(update.Message)
 		}
 
-		chatID = update.Message.Chat.ID
-
-		if update.Message.IsCommand() {
-			handleCommand(update.Message)
-			continue
+		if update.CallbackQuery != nil {
+			handleCallback(update.CallbackQuery)
 		}
-
-		handleButton(update.Message)
 	}
 }
 
@@ -131,6 +131,10 @@ func handleButton(message *tgbotapi.Message) {
 
 func startWork(message *tgbotapi.Message) {
 	startWorkTime = time.Now()
+	isWorking = true
+	isBreakRequested = false
+	go startBreakTimer(message.Chat.ID)
+
 	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу розпочато!")
 	bot.Send(msg)
 }
@@ -170,10 +174,12 @@ func finishWork(message *tgbotapi.Message) {
 		"Робочий",
 	})
 
+	isWorking = false
+	isBreakRequested = false
+	startWorkTime = time.Time{}
+
 	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
 	bot.Send(msg)
-
-	startWorkTime = time.Time{}
 }
 
 func registerDayOff(message *tgbotapi.Message) {
@@ -235,13 +241,12 @@ func sendMorningReport() {
 		return
 	}
 
-	// Беремо передостанній рядок
 	lastRow := resp.Values[len(resp.Values)-2]
 	var reportText string
 
 	if len(lastRow) >= 4 {
 		if lastRow[3] == "Вихідний" {
-			reportText = "Учора був вихідний день. Відпочинок — це частина успіху! 🔥"
+			reportText = "Учора був вихідний день. Відпочинок — це теж успіх! 🔥"
 		} else {
 			reportText = "Учора ти пропрацював: " + lastRow[2].(string) + ". Чудова робота! 💪"
 		}
@@ -251,4 +256,58 @@ func sendMorningReport() {
 
 	msg := tgbotapi.NewMessage(chatID, reportText)
 	bot.Send(msg)
+}
+
+func startBreakTimer(chatID int64) {
+	for isWorking {
+		time.Sleep(90 * time.Minute)
+
+		if isWorking && !isBreakRequested {
+			sendBreakReminder(chatID)
+		}
+	}
+}
+
+func sendBreakReminder(chatID int64) {
+	breakMessages := []string{
+		"Час трохи розім'ятись! 🚶‍♂️",
+		"Перерва — найкращий заряд енергії! ⚡",
+		"Дай своїй голові перепочити! ☕",
+		"Пару хвилин розминки = +10% продуктивності! 💪",
+		"Не забувай: найкращі ідеї приходять на прогулянці! 🌳",
+	}
+
+	text := breakMessages[rand.Intn(len(breakMessages))]
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "start_break"),
+			tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "end_break"),
+		),
+	)
+	bot.Send(msg)
+}
+
+func handleCallback(query *tgbotapi.CallbackQuery) {
+	switch query.Data {
+	case "start_break":
+		if !isBreakRequested {
+			isBreakRequested = true
+			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Добре! Відпочивай трохи! ☕")
+			bot.Send(msg)
+		}
+
+	case "end_break":
+		if isBreakRequested {
+			isBreakRequested = false
+			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Чудово! Повертаємось до роботи! 🚀")
+			bot.Send(msg)
+		} else {
+			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Спочатку натисни «Ок, йду відпочивати»!")
+			bot.Send(msg)
+		}
+	}
+
+	bot.Request(tgbotapi.NewCallback(query.ID, ""))
 }
