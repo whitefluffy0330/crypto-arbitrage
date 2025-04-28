@@ -357,12 +357,16 @@ func morningReport() {
 			} else {
 				reportText = "Немає даних за вчорашній день."
 			}
-			msg := tgbotapi.NewMessage(chatID, reportText)
-			        bot.Send(msg)
+			        msg := tgbotapi.NewMessage(chatID, reportText)
+        bot.Send(msg)
         bot.Request(tgbotapi.NewCallback(query.ID, ""))
+    }
 }
 
 func handleGoalCreation(message *tgbotapi.Message) {
-    // Тимчасово порожня функція
+    // Тут буде логіка створення цілі
 }
 
+func handleCallback(query *tgbotapi.CallbackQuery) {
+    // Тут буде логіка обробки кнопок
+}
