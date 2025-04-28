@@ -358,9 +358,11 @@ func morningReport() {
 				reportText = "Немає даних за вчорашній день."
 			}
 			msg := tgbotapi.NewMessage(chatID, reportText)
-			bot.Send(msg)
-		bot.Request(tgbotapi.NewCallback(query.ID, ""))
+			        bot.Send(msg)
+        bot.Request(tgbotapi.NewCallback(query.ID, ""))
+    }
 }
-		
+
+func handleGoalCreation(message *tgbotapi.Message) {
+    // Тимчасова заглушка для створення цілі
 }
-	
