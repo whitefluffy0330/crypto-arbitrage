@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/oauth2/google"
@@ -13,7 +14,7 @@ import (
 )
 
 func main() {
-	// Завантажуємо змінні середовища
+	// Завантаження .env
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Помилка завантаження .env файлу")
@@ -42,7 +43,7 @@ func main() {
 		log.Fatalf("Помилка створення сервісу Sheets API: %v", err)
 	}
 
-	// Створення нового листа "Мапа доходу"
+	// Створення листа "Мапа доходу"
 	addSheetRequest := &sheets.AddSheetRequest{
 		Properties: &sheets.SheetProperties{
 			Title: "Мапа доходу",
@@ -66,7 +67,7 @@ func main() {
 		}
 	}
 
-	// Заповнення заголовків
+	// Запис заголовків у "Мапа доходу"
 	values := [][]interface{}{
 		{"Напрямок", "Статус", "Поточний прибуток ($)", "Цільовий прибуток ($)", "Прогрес (%)", "Дата старту", "План дій"},
 	}
