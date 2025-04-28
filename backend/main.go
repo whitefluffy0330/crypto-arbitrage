@@ -362,7 +362,7 @@ func morningReport() {
 		}
 		bot.Request(tgbotapi.NewCallback(query.ID, ""))
 }
-
+	
 func morningReport() {
 	for {
 		now := time.Now()
