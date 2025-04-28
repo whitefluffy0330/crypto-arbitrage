@@ -363,5 +363,6 @@ func morningReport() {
 }
 
 func handleGoalCreation(message *tgbotapi.Message) {
-    // Логіка створення цілі
+    // Тимчасово порожня функція
 }
+
