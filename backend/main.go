@@ -360,12 +360,7 @@ func morningReport() {
 			msg := tgbotapi.NewMessage(chatID, reportText)
 			bot.Send(msg)
 		}
-	}
-}
-
-		}
-	}
-	bot.Request(tgbotapi.NewCallback(query.ID, ""))
+		bot.Request(tgbotapi.NewCallback(query.ID, ""))
 }
 
 func morningReport() {
