@@ -345,7 +345,8 @@ func morningReport() {
 			bot.Send(msg)
 		}
 func handleGoalCreation(message *tgbotapi.Message) {
-    // Тимчасова заглушка
+    // Тимчасова заглушка, поки не реалізована повна логіка
 }
+
 
 
