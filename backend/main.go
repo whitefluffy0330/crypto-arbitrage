@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -11,22 +13,22 @@ import (
 
 	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
-	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
 
 var (
-	startWorkTime     time.Time
-	srv               *sheets.Service
-	spreadsheetID     string
-	bot               *tgbotapi.BotAPI
-	chatID            int64
-	isWorking         bool
-	isBreakRequested  bool
-	goalState         string
-	tempGoalName      string
+	startWorkTime    time.Time
+	srv              *sheets.Service
+	spreadsheetID    string
+	bot              *tgbotapi.BotAPI
+	chatID           int64
+	isWorking        bool
+	isBreakRequested bool
+	goalState        string
+	tempGoalName     string
+	tempGoalAmount   string
 )
 
 func main() {
@@ -68,8 +70,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Помилка створення конфігурації: %v", err)
 	}
-	client := config.Client(oauth2.NoContext)
-	srv, err = sheets.NewService(oauth2.NoContext, option.WithHTTPClient(client))
+	client := config.Client(context.Background())
+	srv, err = sheets.NewService(context.Background(), option.WithHTTPClient(client))
 	if err != nil {
 		log.Fatalf("Помилка підключення до Google Sheets: %v", err)
 	}
@@ -118,8 +120,7 @@ func handleCommand(message *tgbotapi.Message) {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Введи назву своєї нової цілі:")
 		bot.Send(msg)
 	default:
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Команда не знайдена. Використовуйте кнопки.")
-		bot.Send(msg)
+		showMainKeyboard(message.Chat.ID)
 	}
 }
 
@@ -155,17 +156,7 @@ func finishWork(message *tgbotapi.Message) {
 	duration := endWorkTime.Sub(startWorkTime)
 	hours := int(duration.Hours())
 	minutes := int(duration.Minutes()) % 60
-	durationStr := strings.TrimSpace(strings.Join([]string{func() string {
-		if hours > 0 {
-			return strconv.Itoa(hours) + " год"
-		}
-		return ""
-	}(), func() string {
-		if minutes > 0 {
-			return strconv.Itoa(minutes) + " хв"
-		}
-		return ""
-	}()}, " "))
+	durationStr := strings.TrimSpace(fmt.Sprintf("%d год %d хв", hours, minutes))
 	writeRow("Робочі сесії", []interface{}{startWorkTime.Format("02.01.2006 15:04"), endWorkTime.Format("02.01.2006 15:04"), durationStr, "Робочий"})
 	isWorking = false
 	isBreakRequested = false
@@ -248,13 +239,32 @@ func handleGoalCreation(message *tgbotapi.Message) {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Яка сума ($) потрібна для цієї цілі?")
 		bot.Send(msg)
 	case "waiting_goal_amount":
-		amount := message.Text
-		writeRow("Цілі", []interface{}{tempGoalName, amount, "Активна", time.Now().Format("02.01.2006")})
+		tempGoalAmount = message.Text
+		writeRow("Цілі", []interface{}{tempGoalName, tempGoalAmount, "Активна", time.Now().Format("02.01.2006")})
+		writeIncomeRow()
 		motivations := []string{"Ти на шляху до великого прориву! 🚀", "Ще один крок до нової реальності! 💎", "Велика мрія починається з першого кроку! 🔥", "Ти вкладаєш у свою найкращу версію! 💪"}
 		msg := tgbotapi.NewMessage(message.Chat.ID, motivations[rand.Intn(len(motivations))])
 		bot.Send(msg)
 		goalState = ""
 		tempGoalName = ""
+		tempGoalAmount = ""
+	}
+}
+
+func writeIncomeRow() {
+	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, "Мапа доходу!A:G", &sheets.ValueRange{
+		Values: [][]interface{}{{
+			"Арбітраж",
+			"Активний",
+			0,
+			tempGoalAmount,
+			"0%",
+			time.Now().Format("02.01.2006"),
+			"Працювати над напрямком",
+		}},
+	}).ValueInputOption("USER_ENTERED").Do()
+	if err != nil {
+		log.Printf("Помилка запису в Мапу доходу: %v", err)
 	}
 }
 
@@ -265,8 +275,7 @@ func morningReport() {
 		if now.After(nextReport) {
 			nextReport = nextReport.Add(24 * time.Hour)
 		}
-		duration := nextReport.Sub(now)
-		time.Sleep(duration)
+		time.Sleep(nextReport.Sub(now))
 		if chatID != 0 {
 			readRange := "Робочі сесії!A:D"
 			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
@@ -275,7 +284,6 @@ func morningReport() {
 				continue
 			}
 			if len(resp.Values) < 2 {
-				log.Println("Недостатньо даних у таблиці.")
 				continue
 			}
 			lastRow := resp.Values[len(resp.Values)-2]
