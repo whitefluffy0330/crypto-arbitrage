@@ -360,9 +360,8 @@ func morningReport() {
 			msg := tgbotapi.NewMessage(chatID, reportText)
 			        bot.Send(msg)
         bot.Request(tgbotapi.NewCallback(query.ID, ""))
-    }
 }
 
 func handleGoalCreation(message *tgbotapi.Message) {
-    // Тимчасова заглушка для створення цілі
+    // Логіка створення цілі
 }
