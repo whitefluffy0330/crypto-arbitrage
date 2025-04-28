@@ -29,6 +29,13 @@ var (
 	goalState        string
 	tempGoalName     string
 	tempGoalAmount   string
+	waitingProfit    bool
+)
+
+const (
+	workSheet  = "Робочі сесії"
+	goalSheet  = "Цілі"
+	incomeSheet = "Мапа доходу"
 )
 
 func main() {
@@ -99,6 +106,10 @@ func main() {
 				handleGoalCreation(update.Message)
 				continue
 			}
+			if waitingProfit {
+				handleProfitEntry(update.Message)
+				continue
+			}
 			handleButton(update.Message)
 		}
 		if update.CallbackQuery != nil {
@@ -157,18 +168,87 @@ func finishWork(message *tgbotapi.Message) {
 	hours := int(duration.Hours())
 	minutes := int(duration.Minutes()) % 60
 	durationStr := strings.TrimSpace(fmt.Sprintf("%d год %d хв", hours, minutes))
-	writeRow("Робочі сесії", []interface{}{startWorkTime.Format("02.01.2006 15:04"), endWorkTime.Format("02.01.2006 15:04"), durationStr, "Робочий"})
+	writeRow(workSheet, []interface{}{startWorkTime.Format("02.01.2006 15:04"), endWorkTime.Format("02.01.2006 15:04"), durationStr, "Робочий"})
 	isWorking = false
 	isBreakRequested = false
 	startWorkTime = time.Time{}
-	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу завершено! Вкажи скільки $ ти сьогодні заробив:")
 	bot.Send(msg)
+	waitingProfit = true
+	go profitTimeoutChecker(message.Chat.ID)
 }
 
 func registerDayOff(message *tgbotapi.Message) {
-	writeRow("Робочі сесії", []interface{}{"", "", "", "Вихідний"})
+	writeRow(workSheet, []interface{}{"", "", "", "Вихідний"})
 	msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день записано!")
 	bot.Send(msg)
+}
+
+func handleProfitEntry(message *tgbotapi.Message) {
+	waitingProfit = false
+	profit, err := strconv.ParseFloat(message.Text, 64)
+	if err != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Будь ласка, введи суму прибутку у числовому форматі (наприклад 150).")
+		bot.Send(msg)
+		waitingProfit = true
+		return
+	}
+	updateIncome(profit)
+}
+
+func updateIncome(profit float64) {
+	readRange := incomeSheet + "!A:D"
+	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
+	if err != nil || len(resp.Values) < 2 {
+		log.Printf("Помилка читання доходів: %v", err)
+		return
+	}
+
+	for idx, row := range resp.Values {
+		if len(row) >= 2 && row[0] == "Арбітраж" {
+			currentStr := fmt.Sprintf("%v", row[2])
+			targetStr := fmt.Sprintf("%v", row[3])
+
+			current, _ := strconv.ParseFloat(currentStr, 64)
+			target, _ := strconv.ParseFloat(targetStr, 64)
+
+			newCurrent := current + profit
+			newPercent := (newCurrent / target) * 100
+
+			updateRange := fmt.Sprintf("%s!C%d:D%d", incomeSheet, idx+1, idx+1)
+			_, err = srv.Spreadsheets.Values.Update(spreadsheetID, updateRange, &sheets.ValueRange{
+				Values: [][]interface{}{
+					{newCurrent, fmt.Sprintf("%.2f%%", newPercent)},
+				},
+			}).ValueInputOption("USER_ENTERED").Do()
+			if err != nil {
+				log.Printf("Помилка оновлення доходу: %v", err)
+			}
+
+			motivations := []string{
+				"Ти на шляху до перемоги! 🚀",
+				"Ще один крок ближче до нової реальності! ✨",
+				"Твої зусилля працюють! 🔥",
+				"Ти твориш новий етап життя! 💪",
+			}
+			text := fmt.Sprintf("+%.2f$ зароблено сьогодні! %s\nПрогрес по цілі: %.2f%% ✅", profit, motivations[rand.Intn(len(motivations))], newPercent)
+			bot.Send(tgbotapi.NewMessage(chatID, text))
+			return
+		}
+	}
+}
+
+func profitTimeoutChecker(chatID int64) {
+	time.Sleep(15 * time.Minute)
+	if waitingProfit {
+		bot.Send(tgbotapi.NewMessage(chatID, "Не забудь ввести скільки $ ти заробив сьогодні!"))
+	}
+	time.Sleep(15 * time.Minute)
+	if waitingProfit {
+		waitingProfit = false
+		updateIncome(0)
+		bot.Send(tgbotapi.NewMessage(chatID, "Час вичерпано. Записано 0$ на сьогодні."))
+	}
 }
 
 func showMainKeyboard(chatID int64) {
@@ -199,7 +279,11 @@ func startBreakTimer(chatID int64) {
 }
 
 func sendBreakReminder(chatID int64) {
-	breakMessages := []string{"Час трохи розім'ятись! 🚶‍♂️", "Перерва — найкращий заряд енергії! ⚡", "Дай своїй голові перепочити! ☕", "Пару хвилин розминки = +10% продуктивності! 💪", "Не забувай: найкращі ідеї приходять на прогулянці! 🌳"}
+	breakMessages := []string{
+		"Час трохи розім'ятись! 🚶‍♂️",
+		"Перерва — найкращий заряд енергії! ⚡",
+		"Не забувай: найкращі ідеї приходять на прогулянці! 🌳",
+	}
 	text := breakMessages[rand.Intn(len(breakMessages))]
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
@@ -215,57 +299,17 @@ func handleCallback(query *tgbotapi.CallbackQuery) {
 	case "start_break":
 		if !isBreakRequested {
 			isBreakRequested = true
-			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Добре! Відпочивай трохи! ☕")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(query.Message.Chat.ID, "Відпочивай! ☕"))
 		}
 	case "end_break":
 		if isBreakRequested {
 			isBreakRequested = false
-			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Чудово! Повертаємось до роботи! 🚀")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(query.Message.Chat.ID, "Чудово! Повертаємось до роботи! 🚀"))
 		} else {
-			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Спочатку натисни «Ок, йду відпочивати»!")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(query.Message.Chat.ID, "Спочатку натисни «Ок, йду відпочивати»!"))
 		}
 	}
 	bot.Request(tgbotapi.NewCallback(query.ID, ""))
-}
-
-func handleGoalCreation(message *tgbotapi.Message) {
-	switch goalState {
-	case "waiting_goal_name":
-		tempGoalName = message.Text
-		goalState = "waiting_goal_amount"
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Яка сума ($) потрібна для цієї цілі?")
-		bot.Send(msg)
-	case "waiting_goal_amount":
-		tempGoalAmount = message.Text
-		writeRow("Цілі", []interface{}{tempGoalName, tempGoalAmount, "Активна", time.Now().Format("02.01.2006")})
-		writeIncomeRow()
-		motivations := []string{"Ти на шляху до великого прориву! 🚀", "Ще один крок до нової реальності! 💎", "Велика мрія починається з першого кроку! 🔥", "Ти вкладаєш у свою найкращу версію! 💪"}
-		msg := tgbotapi.NewMessage(message.Chat.ID, motivations[rand.Intn(len(motivations))])
-		bot.Send(msg)
-		goalState = ""
-		tempGoalName = ""
-		tempGoalAmount = ""
-	}
-}
-
-func writeIncomeRow() {
-	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, "Мапа доходу!A:G", &sheets.ValueRange{
-		Values: [][]interface{}{{
-			"Арбітраж",
-			"Активний",
-			0,
-			tempGoalAmount,
-			"0%",
-			time.Now().Format("02.01.2006"),
-			"Працювати над напрямком",
-		}},
-	}).ValueInputOption("USER_ENTERED").Do()
-	if err != nil {
-		log.Printf("Помилка запису в Мапу доходу: %v", err)
-	}
 }
 
 func morningReport() {
@@ -277,7 +321,7 @@ func morningReport() {
 		}
 		time.Sleep(nextReport.Sub(now))
 		if chatID != 0 {
-			readRange := "Робочі сесії!A:D"
+			readRange := workSheet + "!A:D"
 			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 			if err != nil {
 				log.Printf("Помилка читання Google Sheets: %v", err)
@@ -290,7 +334,7 @@ func morningReport() {
 			var reportText string
 			if len(lastRow) >= 4 {
 				if lastRow[3] == "Вихідний" {
-					reportText = "Учора був вихідний день. Відпочинок — це теж успіх! 🔥"
+					reportText = "Учора був вихідний день. Відпочинок — теж успіх! 🔥"
 				} else {
 					reportText = "Учора ти пропрацював: " + lastRow[2].(string) + ". Чудова робота! 💪"
 				}
