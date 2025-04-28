@@ -362,3 +362,43 @@ func morningReport() {
 		}
 	}
 }
+вати»!"))
+		}
+	}
+	bot.Request(tgbotapi.NewCallback(query.ID, ""))
+}
+
+func morningReport() {
+	for {
+		now := time.Now()
+		nextReport := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+		if now.After(nextReport) {
+			nextReport = nextReport.Add(24 * time.Hour)
+		}
+		time.Sleep(nextReport.Sub(now))
+		if chatID != 0 {
+			readRange := workSheet + "!A:D"
+			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
+			if err != nil {
+				log.Printf("Помилка читання Google Sheets: %v", err)
+				continue
+			}
+			if len(resp.Values) < 2 {
+				continue
+			}
+			lastRow := resp.Values[len(resp.Values)-2]
+			var reportText string
+			if len(lastRow) >= 4 {
+				if lastRow[3] == "Вихідний" {
+					reportText = "Учора був вихідний день. Відпочинок — теж успіх! 🔥"
+				} else {
+					reportText = "Учора ти пропрацював: " + lastRow[2].(string) + ". Чудова робота! 💪"
+				}
+			} else {
+				reportText = "Немає даних за вчорашній день."
+			}
+			msg := tgbotapi.NewMessage(chatID, reportText)
+			bot.Send(msg)
+		}
+	}
+}
