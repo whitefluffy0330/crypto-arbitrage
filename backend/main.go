@@ -359,13 +359,130 @@ if len(lastRow) >= 4 {
 }
 msg := tgbotapi.NewMessage(chatID, reportText)
 bot.Send(msg)
+		}
+	}
 }
 
-func handleGoalCreation(message *tgbotapi.Message) {
-// Тут буде логіка створення цілі
+func handleCommand(message *tgbotapi.Message) {
+	switch message.Command() {
+	case "почати_роботу":
+		startWork(message)
+	case "завершити_роботу":
+		finishWork(message)
+	case "вихідний":
+		registerDayOff(message)
+	case "mygoal":
+		goalState = "waiting_goal_name"
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Введи назву своєї нової цілі:")
+		bot.Send(msg)
+	default:
+		showMainKeyboard(message.Chat.ID)
+	}
+}
+
+func handleButton(message *tgbotapi.Message) {
+	switch message.Text {
+	case "Почати роботу":
+		startWork(message)
+	case "Закінчити роботу":
+		finishWork(message)
+	case "Вихідний день":
+		registerDayOff(message)
+	default:
+		showMainKeyboard(message.Chat.ID)
+	}
+}
+
+func startWork(message *tgbotapi.Message) {
+	startWorkTime = time.Now()
+	isWorking = true
+	isBreakRequested = false
+	go startBreakTimer(message.Chat.ID)
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу розпочато!")
+	bot.Send(msg)
+}
+
+func finishWork(message *tgbotapi.Message) {
+	if startWorkTime.IsZero() {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Спочатку потрібно натиснути «Почати роботу»!")
+		bot.Send(msg)
+		return
+	}
+	endWorkTime := time.Now()
+	duration := endWorkTime.Sub(startWorkTime)
+	hours := int(duration.Hours())
+	minutes := int(duration.Minutes()) % 60
+	durationStr := strings.TrimSpace(fmt.Sprintf("%d год %d хв", hours, minutes))
+	writeRow("Робочі сесії", []interface{}{startWorkTime.Format("02.01.2006 15:04"), endWorkTime.Format("02.01.2006 15:04"), durationStr, "Робочий"})
+	isWorking = false
+	isBreakRequested = false
+	startWorkTime = time.Time{}
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу завершено та записано в Google Sheets!")
+	bot.Send(msg)
+}
+
+func registerDayOff(message *tgbotapi.Message) {
+	writeRow("Робочі сесії", []interface{}{"", "", "", "Вихідний"})
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день записано!")
+	bot.Send(msg)
+}
+
+func showMainKeyboard(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
+	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Почати роботу"),
+			tgbotapi.NewKeyboardButton("Закінчити роботу"),
+			tgbotapi.NewKeyboardButton("Вихідний день")),
+	)
+	bot.Send(msg)
+}
+
+func writeRow(sheetName string, values []interface{}) {
+	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName+"!A:D", &sheets.ValueRange{Values: [][]interface{}{values}}).ValueInputOption("USER_ENTERED").Do()
+	if err != nil {
+		log.Printf("Помилка запису в Google Sheets: %v", err)
+	}
+}
+
+func startBreakTimer(chatID int64) {
+	for isWorking {
+		time.Sleep(90 * time.Minute)
+		if isWorking && !isBreakRequested {
+			sendBreakReminder(chatID)
+		}
+	}
+}
+
+func sendBreakReminder(chatID int64) {
+	breakMessages := []string{"Час трохи розім'ятись! 🚶‍♂️", "Перерва — найкращий заряд енергії! ⚡", "Дай своїй голові перепочити! ☕", "Пару хвилин розминки = +10% продуктивності! 💪", "Не забувай: найкращі ідеї приходять на прогулянці! 🌳"}
+	text := breakMessages[rand.Intn(len(breakMessages))]
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "start_break"),
+			tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "end_break")),
+	)
+	bot.Send(msg)
 }
 
 func handleCallback(query *tgbotapi.CallbackQuery) {
-// Тут буде логіка обробки кнопок
-bot.Request(tgbotapi.NewCallback(query.ID, "")) // Цей виклик має бути тут
+	switch query.Data {
+	case "start_break":
+		if !isBreakRequested {
+			isBreakRequested = true
+			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Добре! Відпочивай трохи! ☕")
+			bot.Send(msg)
+		}
+	case "end_break":
+		if isBreakRequested {
+			isBreakRequested = false
+			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Чудово! Повертаємось до роботи! 🚀")
+			bot.Send(msg)
+		} else {
+			msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Спочатку натисни «Ок, йду відпочивати»!")
+			bot.Send(msg)
+		}
+	}
+	bot.Request(tgbotapi.NewCallback(query.ID, ""))
 }
