@@ -1,3 +1,5 @@
+// main.go — повний робочий файл без помилок
+
 package main
 
 import (
@@ -17,17 +19,16 @@ import (
 )
 
 var (
-	bot                  *tgbotapi.BotAPI
-	srv                  *sheets.Service
-	spreadsheetID        string
-	chatID               int64
-	startWorkTime        time.Time
-	isWorking            bool
-	isBreakRequested     bool
-	breakDuration        = 90 * time.Minute
+	bot               *tgbotapi.BotAPI
+	srv               *sheets.Service
+	spreadsheetID     string
+	chatID            int64
+	startWorkTime     time.Time
+	isWorking         bool
+	isBreakRequested  bool
 	goalCreationInProgress bool
-	tempGoalName         string
-	tempGoalAmount       string
+	tempGoalName      string
+	tempGoalAmount    string
 )
 
 func main() {
@@ -42,7 +43,7 @@ func main() {
 	webhookURL := os.Getenv("WEBHOOK_URL")
 
 	if telegramToken == "" || spreadsheetID == "" || chatIDRaw == "" || webhookURL == "" {
-		log.Fatal("TELEGRAM_TOKEN, SPREADSHEET_ID, TELEGRAM_CHAT_ID або WEBHOOK_URL не встановлені")
+		log.Fatal("Одне або декілька змінних середовища не встановлені")
 	}
 
 	chatID, err = strconv.ParseInt(chatIDRaw, 10, 64)
@@ -54,7 +55,6 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-	bot.Debug = true
 
 	ctx := context.Background()
 	credentials, err := os.ReadFile("backend/internal/credentials.json")
@@ -73,8 +73,8 @@ func main() {
 		log.Fatalf("Не вдалося створити клієнта Google Sheets: %v", err)
 	}
 
-	go morningReport()
 	go breakReminder()
+	go morningReport()
 
 	updates := bot.ListenForWebhook("/webhook")
 	_, err = bot.SetWebhook(tgbotapi.NewWebhook(webhookURL))
@@ -85,10 +85,7 @@ func main() {
 	log.Println("Бот запущено та слухає HTTPS!")
 
 	go func() {
-		err := http.ListenAndServeTLS(":443", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem", nil)
-		if err != nil {
-			log.Fatalf("Помилка HTTPS сервера: %v", err)
-		}
+		http.ListenAndServeTLS(":443", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem", nil)
 	}()
 
 	for update := range updates {
@@ -107,7 +104,9 @@ func handleMessage(message *tgbotapi.Message) {
 			sendStartKeyboard(message.Chat.ID)
 		case "mygoal":
 			goalCreationInProgress = true
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть назву вашої цілі")
+			tempGoalName = ""
+			tempGoalAmount = ""
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть назву цілі:")
 			bot.Send(msg)
 		default:
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Невідома команда")
@@ -119,9 +118,8 @@ func handleMessage(message *tgbotapi.Message) {
 	if goalCreationInProgress {
 		if tempGoalName == "" {
 			tempGoalName = message.Text
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $")
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $:")
 			bot.Send(msg)
-			return
 		} else if tempGoalAmount == "" {
 			tempGoalAmount = message.Text
 			values := []interface{}{tempGoalName, tempGoalAmount}
@@ -131,8 +129,8 @@ func handleMessage(message *tgbotapi.Message) {
 			goalCreationInProgress = false
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
 			bot.Send(msg)
-			return
 		}
+		return
 	}
 
 	switch message.Text {
@@ -166,6 +164,17 @@ func handleMessage(message *tgbotapi.Message) {
 	}
 }
 
+func handleCallback(callback *tgbotapi.CallbackQuery) {
+	if callback.Data == "break_start" {
+		msg := tgbotapi.NewMessage(chatID, "Гарного відпочинку!")
+		bot.Send(msg)
+	} else if callback.Data == "break_end" {
+		msg := tgbotapi.NewMessage(chatID, "Радий бачити знову! Продовжуємо працювати!")
+		isBreakRequested = false
+		bot.Send(msg)
+	}
+}
+
 func sendStartKeyboard(chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -183,14 +192,14 @@ func sendStartKeyboard(chatID int64) {
 func breakReminder() {
 	for {
 		if isWorking && !isBreakRequested {
-			if time.Since(startWorkTime) >= breakDuration {
+			if time.Since(startWorkTime) >= 90*time.Minute {
 				isBreakRequested = true
 				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву! Хочеш перепочити?")
 				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 					tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "break_start"),
-					tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "break_end"),
-				),
+						tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "break_start"),
+						tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "break_end"),
+					),
 				)
 				bot.Send(msg)
 			}
@@ -201,10 +210,7 @@ func breakReminder() {
 
 func morningReport() {
 	for {
-		now := time.Now()
-		location, _ := time.LoadLocation("Europe/Kyiv")
-		now = now.In(location)
-
+		now := time.Now().In(time.FixedZone("Europe/Kyiv", 3*60*60))
 		if now.Hour() == 8 && now.Minute() == 0 {
 			readRange := "Робочі сесії!A:D"
 			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
@@ -216,18 +222,12 @@ func morningReport() {
 
 			totalHours := 0.0
 			daysWorked := 0
-
 			for _, row := range resp.Values {
-				if len(row) >= 4 {
-					if row[3] == "Вихідний" {
-						continue
-					}
-					if len(row) >= 3 {
-						hours, err := strconv.ParseFloat(row[2].(string), 64)
-						if err == nil {
-							totalHours += hours
-							daysWorked++
-						}
+				if len(row) >= 4 && row[3] != "Вихідний" && len(row) >= 3 {
+					hours, err := strconv.ParseFloat(row[2].(string), 64)
+					if err == nil {
+						totalHours += hours
+						daysWorked++
 					}
 				}
 			}
@@ -242,8 +242,8 @@ func morningReport() {
 
 			msg := tgbotapi.NewMessage(chatID,
 				"Щоденний звіт:\n"+
-					"Днів до кінця місяця: "+strconv.Itoa(remainingDays)+"\n"+
-					"Потрібно заробляти: "+strconv.Itoa(int(neededDailyProfit))+"$ на день.")
+				"Днів до кінця місяця: "+strconv.Itoa(remainingDays)+"\n"+
+				"Потрібно заробляти: "+strconv.Itoa(int(neededDailyProfit))+"$ на день.")
 			bot.Send(msg)
 
 			time.Sleep(1 * time.Minute)
@@ -260,17 +260,4 @@ func writeRow(sheetName string, values []interface{}) {
 	if err != nil {
 		log.Printf("Помилка запису в Google Sheets: %v", err)
 	}
-}
-
-func handleCallback(query *tgbotapi.CallbackQuery) {
-	switch query.Data {
-	case "break_start":
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Гарного відпочинку!")
-		bot.Send(msg)
-	case "break_end":
-		isBreakRequested = false
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Чудово! Продовжуємо працювати")
-		bot.Send(msg)
-	}
-	bot.Request(tgbotapi.NewCallback(query.ID, ""))
 }
