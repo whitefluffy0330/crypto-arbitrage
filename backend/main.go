@@ -167,7 +167,23 @@ func main() {
 		bot.Send(msg)
 	}
 }
-
+    if goalCreationInProgress {
+        if tempGoalName == "" {
+            tempGoalName = message.Text
+            msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть бажану суму доходу:")
+            bot.Send(msg)
+        } else if tempGoalAmount == "" {
+            tempGoalAmount = message.Text
+            values := []interface{}{tempGoalName, tempGoalAmount}
+            writeRow("Мапа доходу", values)
+            tempGoalName = ""
+            tempGoalAmount = ""
+            goalCreationInProgress = false
+            msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
+            bot.Send(msg)
+        }
+        return
+    }
 func sendStartKeyboard(chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
