@@ -191,16 +191,4 @@ func writeRow(sheetName string, values []interface{}) {
 	ctx := context.Background()
 	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName, &sheets.ValueRange{
 		Values: [][]interface{}{values},
-	}).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		log.Printf("Помилка запису в Google Sheets: %v", err)
-	}
-}
-
-func breakReminder() {
-	for {
-		if isWorking && !isBreakRequested {
-			if time.Since(startWorkTime) >= breakDuration {
-				isBreakRequested = true
-				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву! Хочеш перепочити?")
-				msg.ReplyMarkup = tgbotapi.NewInline
+	}).ValueInputOption("RAW").Context(ctx).Do
