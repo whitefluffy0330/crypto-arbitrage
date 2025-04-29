@@ -30,7 +30,7 @@ var (
 )
 
 func main() {
-	err := godotenv.Load("backend/.env")
+	err := godotenv.Load(".env")
 	if err != nil {
 		log.Fatal("Помилка завантаження .env файлу")
 	}
