@@ -77,7 +77,7 @@ func main() {
 		log.Fatal("Помилка створення конфігурації webhook:", err)
 	}
 
-	_, err = bot.SetWebhook(webhookCfg)
+	_, err = bot.Request(webhookCfg)
 	if err != nil {
 		log.Fatal("Помилка встановлення webhook:", err)
 	}
@@ -125,7 +125,7 @@ func handleMessage(message *tgbotapi.Message) {
 			bot.Send(msg)
 		} else {
 			tempGoalAmount = message.Text
-			values := []interface{}{tempGoalName, tempGoalAmount, "Активна", time.Now().Format("02.01.2006")}
+			values := []interface{}{tempGoalName, tempGoalAmount, "Активний", time.Now().Format("02.01.2006")}
 			writeRow("Цілі", values)
 			valuesIncome := []interface{}{"Арбітраж", "Активний", 0, tempGoalAmount, "0%", time.Now().Format("02.01.2006"), "Працювати над напрямком"}
 			writeRow("Мапа доходу", valuesIncome)
@@ -196,3 +196,11 @@ func writeRow(sheetName string, values []interface{}) {
 		log.Printf("Помилка запису в Google Sheets: %v", err)
 	}
 }
+
+func breakReminder() {
+	for {
+		if isWorking && !isBreakRequested {
+			if time.Since(startWorkTime) >= breakDuration {
+				isBreakRequested = true
+				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву! Хочеш перепочити?")
+				msg.ReplyMarkup = tgbotapi.NewInline
