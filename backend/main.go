@@ -113,30 +113,23 @@ func main() {
             bot.Send(msg)
         }
         return
-    }
-
-    if goalCreationInProgress {
-        if tempGoalName == "" {
-            tempGoalName = message.Text
-            msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $:")
-            bot.Send(msg)
-            return
-        }
-
-        if tempGoalAmount == "" {
-            tempGoalAmount = message.Text
-            values := []interface{}{tempGoalName, tempGoalAmount}
-            writeRow("Мапа доходу", values)
-            tempGoalName = ""
-            tempGoalAmount = ""
-            goalCreationInProgress = false
-            msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
-            bot.Send(msg)
-            return
-        }
-    }
-}
-
+	            if goalCreationInProgress {
+            if tempGoalName == "" {
+                tempGoalName = message.Text
+                msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $:")
+                bot.Send(msg)
+            } else if tempGoalAmount == "" {
+                tempGoalAmount = message.Text
+                values := []interface{}{tempGoalName, tempGoalAmount}
+                writeRow("Мапа доходу", values)
+                tempGoalName = ""
+                tempGoalAmount = ""
+                goalCreationInProgress = false
+                msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
+                bot.Send(msg)
+            }
+       }
+	return
 	switch message.Text {
 	case "Почати роботу":
 		if !isWorking {
@@ -167,29 +160,7 @@ func main() {
 		bot.Send(msg)
 	}
 }
-            case "Вихідний день":
-            writeRow("Робочі сесії", []interface{}{time.Now().Format("02.01.2006 15:04")})
-            isWorking = false
-            msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день зафіксовано!")
-            bot.Send(msg)
-        }
-
-        if goalCreationInProgress {
-            if tempGoalName == "" {
-                tempGoalName = message.Text
-                msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть бажану суму:")
-                bot.Send(msg)
-            } else if tempGoalAmount == "" {
-                tempGoalAmount = message.Text
-                values := []interface{}{tempGoalName, tempGoalAmount}
-                writeRow("Мапа доходу", values)
-                tempGoalName = ""
-                tempGoalAmount = ""
-                goalCreationInProgress = false
-                msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
-                bot.Send(msg)
-            }
-            return
+        
         }
 func sendStartKeyboard(chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
