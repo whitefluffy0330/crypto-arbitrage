@@ -189,6 +189,4 @@ func handleCallback(cb *tgbotapi.CallbackQuery) {
 
 func writeRow(sheetName string, values []interface{}) {
 	ctx := context.Background()
-	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName, &sheets.ValueRange{
-		Values: [][]interface{}{values},
-	}).ValueInputOption("RAW").Context(ctx).Do
+	_, err
