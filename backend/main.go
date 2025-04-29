@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -24,7 +25,6 @@ var (
 	startWorkTime       time.Time
 	isWorking           bool
 	isBreakRequested    bool
-	breakTimerStart     time.Time
 	breakDuration       = 90 * time.Minute
 	goalCreationInProgress bool
 	isWaitingForProfit  bool
@@ -113,11 +113,19 @@ func handleMessage(message *tgbotapi.Message) {
 			sendStartKeyboard(message.Chat.ID)
 		case "mygoal":
 			goalCreationInProgress = true
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть назву вашої цілі:")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Введіть назву вашої цілі:"))
+		case "update_code":
+			if message.From.ID == int(chatID) {
+				bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Оновлюю код та перезапускаю бота..."))
+				go func() {
+					time.Sleep(1 * time.Second)
+					exec.Command("/bin/bash", "/home/azureuser/update.sh").Run()
+				}()
+			} else {
+				bot.Send(tgbotapi.NewMessage(message.Chat.ID, "У вас немає прав для цієї команди."))
+			}
 		default:
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Невідома команда")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Невідома команда"))
 		}
 		return
 	}
@@ -125,8 +133,7 @@ func handleMessage(message *tgbotapi.Message) {
 	if goalCreationInProgress {
 		if tempGoalName == "" {
 			tempGoalName = message.Text
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $:")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $:"))
 		} else if tempGoalAmount == "" {
 			tempGoalAmount = message.Text
 			values := []interface{}{tempGoalName, tempGoalAmount}
@@ -135,8 +142,7 @@ func handleMessage(message *tgbotapi.Message) {
 			tempGoalName = ""
 			tempGoalAmount = ""
 			goalCreationInProgress = false
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!"))
 		}
 		return
 	}
@@ -144,19 +150,14 @@ func handleMessage(message *tgbotapi.Message) {
 	if isWaitingForProfit {
 		amount, err := strconv.ParseFloat(message.Text, 64)
 		if err != nil {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Некоректна сума. Спробуйте ще раз")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Некоректна сума. Спробуйте ще раз"))
 			return
 		}
-
 		date := time.Now().Format("02.01.2006")
 		writeRow("Мапа доходу", []interface{}{date, "Арбітраж", amount})
-
 		goalValue, _ := strconv.ParseFloat(lastGoalAmount, 64)
 		progress := int((amount / goalValue) * 100)
-
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Дохід зафіксовано! Поточний прогрес: "+strconv.Itoa(progress)+"% до цілі.")
-		bot.Send(msg)
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Дохід зафіксовано! Поточний прогрес: "+strconv.Itoa(progress)+"% до цілі."))
 		isWaitingForProfit = false
 		return
 	}
@@ -167,11 +168,9 @@ func handleMessage(message *tgbotapi.Message) {
 			startWorkTime = time.Now()
 			isWorking = true
 			isBreakRequested = false
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Робоча сесія розпочалася!")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Робоча сесія розпочалася!"))
 		} else {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Ви вже працюєте!")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ви вже працюєте!"))
 		}
 	case "Закінчити роботу":
 		if isWorking {
@@ -182,26 +181,22 @@ func handleMessage(message *tgbotapi.Message) {
 				duration.String(),
 			})
 			isWorking = false
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Робочу сесію завершено! Пропрацьовано "+duration.String())
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Сесію завершено. Пропрацьовано "+duration.String()))
 		} else {
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Робоча сесія не активна.")
-			bot.Send(msg)
+			bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Робоча сесія не активна."))
 		}
 	case "Вихідний день":
 		writeRow("Робочі сесії", []interface{}{time.Now().Format("02.01.2006"), "-", "-", "Вихідний"})
 		isWorking = false
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день зафіксовано.")
-		bot.Send(msg)
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Вихідний день зафіксовано."))
 	case "Додати прибуток":
 		isWaitingForProfit = true
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть суму прибутку у $:")
-		bot.Send(msg)
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Введіть суму прибутку у $:"))
 	}
 }
 
 func handleCallback(callback *tgbotapi.CallbackQuery) {
-	// За потреби можна додати логіку для кнопок відпочинку
+	// можеш додати обробку кнопок break_start / break_end
 }
 
 func sendStartKeyboard(chatID int64) {
@@ -213,8 +208,6 @@ func sendStartKeyboard(chatID int64) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("Вихідний день"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("Додати прибуток"),
 		),
 	)
@@ -280,13 +273,7 @@ func breakReminder() {
 		if isWorking && !isBreakRequested {
 			if time.Since(startWorkTime) >= breakDuration {
 				isBreakRequested = true
-				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву! Хочеш перепочити?")
-				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-					tgbotapi.NewInlineKeyboardRow(
-						tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "break_start"),
-						tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "break_end"),
-					),
-				)
+				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву!")
 				bot.Send(msg)
 			}
 		}
