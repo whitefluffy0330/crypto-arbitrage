@@ -1,4 +1,3 @@
-// main.go — повний робочий файл без помилок
 
 package main
 
@@ -26,7 +25,8 @@ var (
 	startWorkTime     time.Time
 	isWorking         bool
 	isBreakRequested  bool
-	goalCreationInProgress bool
+	breakDuration     = 90 * time.Minute
+	goalCreationStage int
 	tempGoalName      string
 	tempGoalAmount    string
 )
@@ -43,7 +43,7 @@ func main() {
 	webhookURL := os.Getenv("WEBHOOK_URL")
 
 	if telegramToken == "" || spreadsheetID == "" || chatIDRaw == "" || webhookURL == "" {
-		log.Fatal("Одне або декілька змінних середовища не встановлені")
+		log.Fatal("TELEGRAM_BOT_TOKEN, SPREADSHEET_ID, TELEGRAM_CHAT_ID або WEBHOOK_URL не встановлені")
 	}
 
 	chatID, err = strconv.ParseInt(chatIDRaw, 10, 64)
@@ -55,6 +55,7 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
+	bot.Debug = true
 
 	ctx := context.Background()
 	credentials, err := os.ReadFile("backend/internal/credentials.json")
@@ -73,8 +74,8 @@ func main() {
 		log.Fatalf("Не вдалося створити клієнта Google Sheets: %v", err)
 	}
 
-	go breakReminder()
 	go morningReport()
+	go breakReminder()
 
 	updates := bot.ListenForWebhook("/webhook")
 	_, err = bot.SetWebhook(tgbotapi.NewWebhook(webhookURL))
@@ -85,7 +86,12 @@ func main() {
 	log.Println("Бот запущено та слухає HTTPS!")
 
 	go func() {
-		http.ListenAndServeTLS(":443", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem", "/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem", nil)
+		err := http.ListenAndServeTLS(":443",
+			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem",
+			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem", nil)
+		if err != nil {
+			log.Fatalf("Помилка HTTPS сервера: %v", err)
+		}
 	}()
 
 	for update := range updates {
@@ -98,36 +104,21 @@ func main() {
 }
 
 func handleMessage(message *tgbotapi.Message) {
+	if goalCreationStage > 0 {
+		handleGoalCreation(message)
+		return
+	}
+
 	if message.IsCommand() {
 		switch message.Command() {
 		case "start":
 			sendStartKeyboard(message.Chat.ID)
 		case "mygoal":
-			goalCreationInProgress = true
-			tempGoalName = ""
-			tempGoalAmount = ""
+			goalCreationStage = 1
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть назву цілі:")
 			bot.Send(msg)
 		default:
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Невідома команда")
-			bot.Send(msg)
-		}
-		return
-	}
-
-	if goalCreationInProgress {
-		if tempGoalName == "" {
-			tempGoalName = message.Text
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Введіть цільову суму у $:")
-			bot.Send(msg)
-		} else if tempGoalAmount == "" {
-			tempGoalAmount = message.Text
-			values := []interface{}{tempGoalName, tempGoalAmount}
-			writeRow("Мапа доходу", values)
-			tempGoalName = ""
-			tempGoalAmount = ""
-			goalCreationInProgress = false
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Ціль додано!")
 			bot.Send(msg)
 		}
 		return
@@ -148,9 +139,13 @@ func handleMessage(message *tgbotapi.Message) {
 	case "Закінчити роботу":
 		if isWorking {
 			duration := time.Since(startWorkTime)
-			writeRow("Робочі сесії", []interface{}{startWorkTime.Format("02.01.2006 15:04"), time.Now().Format("02.01.2006 15:04"), duration.String()})
+			writeRow("Робочі сесії", []interface{}{
+				startWorkTime.Format("02.01.2006 15:04"),
+				time.Now().Format("02.01.2006 15:04"),
+				duration.String(),
+			})
 			isWorking = false
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Робочу сесію завершено! Пропрацьовано "+duration.String())
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Роботу завершено! Тривалість: "+duration.String())
 			bot.Send(msg)
 		} else {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Робоча сесія не активна.")
@@ -160,17 +155,6 @@ func handleMessage(message *tgbotapi.Message) {
 		writeRow("Робочі сесії", []interface{}{time.Now().Format("02.01.2006"), "-", "-", "Вихідний"})
 		isWorking = false
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день зафіксовано.")
-		bot.Send(msg)
-	}
-}
-
-func handleCallback(callback *tgbotapi.CallbackQuery) {
-	if callback.Data == "break_start" {
-		msg := tgbotapi.NewMessage(chatID, "Гарного відпочинку!")
-		bot.Send(msg)
-	} else if callback.Data == "break_end" {
-		msg := tgbotapi.NewMessage(chatID, "Радий бачити знову! Продовжуємо працювати!")
-		isBreakRequested = false
 		bot.Send(msg)
 	}
 }
@@ -189,66 +173,58 @@ func sendStartKeyboard(chatID int64) {
 	bot.Send(msg)
 }
 
-func breakReminder() {
-	for {
-		if isWorking && !isBreakRequested {
-			if time.Since(startWorkTime) >= 90*time.Minute {
-				isBreakRequested = true
-				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву! Хочеш перепочити?")
-				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-					tgbotapi.NewInlineKeyboardRow(
-						tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "break_start"),
-						tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "break_end"),
-					),
-				)
-				bot.Send(msg)
-			}
-		}
-		time.Sleep(1 * time.Minute)
+func handleGoalCreation(message *tgbotapi.Message) {
+	switch goalCreationStage {
+	case 1:
+		tempGoalName = message.Text
+		goalCreationStage = 2
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Введіть суму цілі у $:"))
+	case 2:
+		tempGoalAmount = message.Text
+		values := []interface{}{tempGoalName, tempGoalAmount}
+		writeRow("Мапа доходу", values)
+		tempGoalName, tempGoalAmount = "", ""
+		goalCreationStage = 0
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ціль успішно додано!"))
+	}
+}
+
+func handleCallback(callback *tgbotapi.CallbackQuery) {
+	switch callback.Data {
+	case "break_start":
+		isBreakRequested = true
+		bot.Send(tgbotapi.NewMessage(callback.Message.Chat.ID, "Добре! Зроби собі чай і відпочинь трохи!"))
+	case "break_end":
+		isBreakRequested = false
+		bot.Send(tgbotapi.NewMessage(callback.Message.Chat.ID, "Круто! Повертаємось до роботи."))
 	}
 }
 
 func morningReport() {
 	for {
-		now := time.Now().In(time.FixedZone("Europe/Kyiv", 3*60*60))
+		now := time.Now().In(time.FixedZone("Kyiv", 2*60*60))
 		if now.Hour() == 8 && now.Minute() == 0 {
-			readRange := "Робочі сесії!A:D"
-			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
-			if err != nil {
-				log.Printf("Помилка читання Google Sheets: %v", err)
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-
-			totalHours := 0.0
-			daysWorked := 0
-			for _, row := range resp.Values {
-				if len(row) >= 4 && row[3] != "Вихідний" && len(row) >= 3 {
-					hours, err := strconv.ParseFloat(row[2].(string), 64)
-					if err == nil {
-						totalHours += hours
-						daysWorked++
-					}
-				}
-			}
-
-			requiredMonthlyIncome := 2000.0
-			daysInMonth := 30
-			remainingDays := daysInMonth - daysWorked
-			if remainingDays <= 0 {
-				remainingDays = 1
-			}
-			neededDailyProfit := requiredMonthlyIncome / float64(remainingDays)
-
-			msg := tgbotapi.NewMessage(chatID,
-				"Щоденний звіт:\n"+
-				"Днів до кінця місяця: "+strconv.Itoa(remainingDays)+"\n"+
-				"Потрібно заробляти: "+strconv.Itoa(int(neededDailyProfit))+"$ на день.")
-			bot.Send(msg)
-
-			time.Sleep(1 * time.Minute)
+			writeRow("Робочі сесії", []interface{}{time.Now().Format("02.01.2006"), "Звіт", "-", "Автоматично"})
+			bot.Send(tgbotapi.NewMessage(chatID, "Нагадування: новий день — нові можливості!"))
 		}
-		time.Sleep(30 * time.Second)
+		time.Sleep(1 * time.Minute)
+	}
+}
+
+func breakReminder() {
+	for {
+		if isWorking && !isBreakRequested && time.Since(startWorkTime) > breakDuration {
+			isBreakRequested = true
+			msg := tgbotapi.NewMessage(chatID, "Час зробити перерву!")
+			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "break_start"),
+					tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "break_end"),
+				),
+			)
+			bot.Send(msg)
+		}
+		time.Sleep(1 * time.Minute)
 	}
 }
 
