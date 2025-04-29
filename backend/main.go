@@ -16,17 +16,17 @@ import (
 )
 
 var (
-	bot               *tgbotapi.BotAPI
-	srv               *sheets.Service
-	spreadsheetID     string
-	chatID            int64
-	startWorkTime     time.Time
-	isWorking         bool
-	isBreakRequested  bool
-	breakDuration     = 90 * time.Minute
-	goalCreation      bool
-	tempGoalName      string
-	tempGoalAmount    string
+	bot            *tgbotapi.BotAPI
+	srv            *sheets.Service
+	spreadsheetID  string
+	chatID         int64
+	startWorkTime  time.Time
+	isWorking      bool
+	isBreakRequested bool
+	breakDuration  = 90 * time.Minute
+	goalCreation   bool
+	tempGoalName   string
+	tempGoalAmount string
 )
 
 func main() {
@@ -72,11 +72,14 @@ func main() {
 		log.Fatalf("Не вдалося створити клієнта Google Sheets: %v", err)
 	}
 
-	updates := bot.ListenForWebhook("/webhook")
-	webhookCfg := tgbotapi.NewWebhook(webhookURL)
-	_, err = bot.Request(webhookCfg)
+	webhookCfg, err := tgbotapi.NewWebhook(webhookURL)
 	if err != nil {
-		log.Fatal("Помилка встановлення webhook")
+		log.Fatal("Помилка створення конфігурації webhook:", err)
+	}
+
+	_, err = bot.SetWebhook(webhookCfg)
+	if err != nil {
+		log.Fatal("Помилка встановлення webhook:", err)
 	}
 
 	log.Println("Бот запущено та слухає HTTPS!")
@@ -87,6 +90,8 @@ func main() {
 			log.Fatalf("Помилка HTTPS сервера: %v", err)
 		}
 	}()
+
+	updates := bot.ListenForWebhook("/webhook")
 
 	for update := range updates {
 		if update.Message != nil {
@@ -120,7 +125,10 @@ func handleMessage(message *tgbotapi.Message) {
 			bot.Send(msg)
 		} else {
 			tempGoalAmount = message.Text
-			writeRow("Мапа доходу", []interface{}{tempGoalName, tempGoalAmount})
+			values := []interface{}{tempGoalName, tempGoalAmount, "Активна", time.Now().Format("02.01.2006")}
+			writeRow("Цілі", values)
+			valuesIncome := []interface{}{"Арбітраж", "Активний", 0, tempGoalAmount, "0%", time.Now().Format("02.01.2006"), "Працювати над напрямком"}
+			writeRow("Мапа доходу", valuesIncome)
 			tempGoalName = ""
 			tempGoalAmount = ""
 			goalCreation = false
@@ -145,7 +153,7 @@ func handleMessage(message *tgbotapi.Message) {
 	case "Закінчити роботу":
 		if isWorking {
 			duration := time.Since(startWorkTime)
-			writeRow("Робочі сесії", []interface{}{startWorkTime.Format("02.01.2006 15:04"), time.Now().Format("02.01.2006 15:04"), duration.String()})
+			writeRow("Робочі сесії", []interface{}{startWorkTime.Format("02.01.2006 15:04"), time.Now().Format("02.01.2006 15:04"), duration.String(), "Робочий"})
 			isWorking = false
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Робочу сесію завершено! Пропрацьовано "+duration.String())
 			bot.Send(msg)
