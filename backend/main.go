@@ -16,19 +16,19 @@ import (
 )
 
 var (
-	bot              *tgbotapi.BotAPI
-	srv              *sheets.Service
-	spreadsheetID    string
-	chatID           int64
-	startWorkTime    time.Time
-	isWorking        bool
+	bot            *tgbotapi.BotAPI
+	srv            *sheets.Service
+	spreadsheetID  string
+	chatID         int64
+	startWorkTime  time.Time
+	isWorking      bool
 	isBreakRequested bool
 	breakTimerStart  time.Time
 	breakDuration    = 90 * time.Minute
 
 	goalCreationInProgress bool
-	tempGoalName            string
-	tempGoalAmount          string
+	tempGoalName           string
+	tempGoalAmount         string
 )
 
 func main() {
@@ -74,7 +74,12 @@ func main() {
 		log.Fatalf("Не вдалося створити клієнта Google Sheets: %v", err)
 	}
 
-	_, err = bot.Request(tgbotapi.NewWebhook(webhookURL))
+	webhookCfg, err := tgbotapi.NewWebhook(webhookURL)
+	if err != nil {
+		log.Fatal("Помилка створення конфігурації webhook:", err)
+	}
+
+	_, err = bot.Request(webhookCfg)
 	if err != nil {
 		log.Fatal("Помилка встановлення webhook:", err)
 	}
@@ -165,126 +170,4 @@ func handleMessage(message *tgbotapi.Message) {
 			bot.Send(msg)
 		}
 	case "Вихідний день":
-		writeRow("Робочі сесії", []interface{}{time.Now().Format("02.01.2006"), "-", "-", "Вихідний"})
-		isWorking = false
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Вихідний день зафіксовано.")
-		bot.Send(msg)
-	}
-}
-
-func sendStartKeyboard(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Оберіть дію:")
-	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Почати роботу"),
-			tgbotapi.NewKeyboardButton("Закінчити роботу"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Вихідний день"),
-		),
-	)
-	bot.Send(msg)
-}
-
-func startGoalCreation(chatID int64) {
-	goalCreationInProgress = true
-	tempGoalName = ""
-	tempGoalAmount = ""
-	msg := tgbotapi.NewMessage(chatID, "Введіть назву нової цілі:")
-	bot.Send(msg)
-}
-
-func handleCallback(callback *tgbotapi.CallbackQuery) {
-	if callback.Data == "break_start" {
-		breakTimerStart = time.Now()
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Чудово, відпочиньте кілька хвилин!")
-		bot.Send(msg)
-	} else if callback.Data == "break_end" {
-		breakDuration := time.Since(breakTimerStart)
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Вітаю з поверненням! Відпочинок тривав "+breakDuration.String())
-		bot.Send(msg)
-		isBreakRequested = false
-	}
-}
-
-func morningReport() {
-	for {
-		now := time.Now()
-		location, _ := time.LoadLocation("Europe/Kyiv")
-		now = now.In(location)
-
-		if now.Hour() == 8 && now.Minute() == 0 {
-			readRange := "Робочі сесії!A:D"
-			resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
-			if err != nil {
-				log.Printf("Помилка читання Google Sheets: %v", err)
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-
-			totalHours := 0.0
-			daysWorked := 0
-
-			for _, row := range resp.Values {
-				if len(row) >= 4 {
-					if row[3] == "Вихідний" {
-						continue
-					}
-					if len(row) >= 3 {
-						hours, err := strconv.ParseFloat(row[2].(string), 64)
-						if err == nil {
-							totalHours += hours
-							daysWorked++
-						}
-					}
-				}
-			}
-
-			requiredMonthlyIncome := 2000.0
-			daysInMonth := 30
-			remainingDays := daysInMonth - daysWorked
-			if remainingDays <= 0 {
-				remainingDays = 1
-			}
-			neededDailyProfit := requiredMonthlyIncome / float64(remainingDays)
-
-			msg := tgbotapi.NewMessage(chatID,
-				"Щоденний звіт:\n"+
-					"Днів до кінця місяця: "+strconv.Itoa(remainingDays)+"\n"+
-					"Потрібно заробляти: "+strconv.Itoa(int(neededDailyProfit))+"$ на день.")
-			bot.Send(msg)
-
-			time.Sleep(1 * time.Minute)
-		}
-		time.Sleep(30 * time.Second)
-	}
-}
-
-func breakReminder() {
-	for {
-		if isWorking && !isBreakRequested {
-			if time.Since(startWorkTime) >= breakDuration {
-				isBreakRequested = true
-				msg := tgbotapi.NewMessage(chatID, "Час зробити перерву! Хочеш перепочити?")
-				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-					tgbotapi.NewInlineKeyboardRow(
-						tgbotapi.NewInlineKeyboardButtonData("Ок, йду відпочивати", "break_start"),
-						tgbotapi.NewInlineKeyboardButtonData("Я вже тут", "break_end"),
-					),
-				)
-				bot.Send(msg)
-			}
-		}
-		time.Sleep(1 * time.Minute)
-	}
-}
-
-func writeRow(sheetName string, values []interface{}) {
-	ctx := context.Background()
-	_, err := srv.Spreadsheets.Values.Append(spreadsheetID, sheetName, &sheets.ValueRange{
-		Values: [][]interface{}{values},
-	}).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		log.Printf("Помилка запису в Google Sheets: %v", err)
-	}
-}
+		writeRow("Робочі сесії", []interface{}{time.Now().Format("02.01.2006"), "-", "-", "Вихідний
