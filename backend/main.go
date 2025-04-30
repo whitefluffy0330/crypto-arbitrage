@@ -5,10 +5,11 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/sheets"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/telegram"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/telegram/goal"
+	"github.com/whitefluffy0330/crypto-arbitrage-bot/backend/internal/config"
+	"github.com/whitefluffy0330/crypto-arbitrage-bot/backend/internal/sheets"
+	"github.com/whitefluffy0330/crypto-arbitrage-bot/backend/internal/telegram"
+	"github.com/whitefluffy0330/crypto-arbitrage-bot/backend/internal/telegram/goal"
+
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
