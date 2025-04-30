@@ -5,6 +5,8 @@ import (
 	"log"
 	"strconv"
 
+	"backend/internal/telegram/goal"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"google.golang.org/api/sheets/v4"
 )
@@ -47,6 +49,8 @@ func HandleCloseGoalInput(bot *tgbotapi.BotAPI, chatID int64, srv *sheets.Servic
 			if err != nil {
 				log.Printf("Помилка оновлення цілі: %v", err)
 			}
+
+			goal.MarkGoalClosed()
 
 			msg := fmt.Sprintf("✅ Ціль успішно закрита! Фактична сума: $%d", amount)
 			bot.Send(tgbotapi.NewMessage(chatID, msg))
