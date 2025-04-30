@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
-	"backend/internal/telegram/goal"
+	"github.com/whitefluffy0330/crypto-arbitrage-bot/backend/internal/telegram/goal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"google.golang.org/api/sheets/v4"
