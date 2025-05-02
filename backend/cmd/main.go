@@ -9,6 +9,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"golang.org/x/oauth2/google"
