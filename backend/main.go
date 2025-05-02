@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/sheets"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/telegram"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
 
