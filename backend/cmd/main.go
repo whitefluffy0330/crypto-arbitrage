@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
+	"crypto-arbitrage/internal/config"
+	"crypto-arbitrage/internal/sheets"
+	"crypto-arbitrage/internal/telegram"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"golang.org/x/oauth2/google"
