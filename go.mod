@@ -1,4 +1,4 @@
-module crypto-arbitrage
+module github.com/whitefluffy0330/crypto-arbitrage
 
 go 1.22
 
