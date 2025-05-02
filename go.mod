@@ -10,7 +10,7 @@ require (
 	google.golang.org/api v0.180.0
 )
 
-replace github.com/whitefluffy0330/crypto-arbitrage-bot/internal/config => ./internal/config
-replace github.com/whitefluffy0330/crypto-arbitrage-bot/internal/sheets => ./internal/sheets
-replace github.com/whitefluffy0330/crypto-arbitrage-bot/internal/telegram => ./internal/telegram
-replace github.com/whitefluffy0330/crypto-arbitrage-bot/internal/telegram/goal => ./internal/telegram/goal
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/config => ./internal/config
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/sheets => ./internal/sheets
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram => ./internal/telegram
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal => ./internal/telegram/goal
