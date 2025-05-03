@@ -27,16 +27,21 @@ func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID
 			timer := time.NewTimer(duration)
 			<-timer.C
 
-			if enableReport && !eveningReportSent {
+			if !eveningReportSent {
 				report := sheets.GenerateProgressReport(srv, spreadsheetID)
-				SendEveningReport(bot, chatID, report)
+				SendEveningReport(bot, chatID, report, enableReport)
 				eveningReportSent = true
 			}
 		}
 	}()
 }
 
-func SendEveningReport(bot *tgbotapi.BotAPI, chatID int64, report string) {
+func SendEveningReport(bot *tgbotapi.BotAPI, chatID int64, report string, enableReport bool) {
+	if !enableReport {
+		log.Println("Вечірній звіт вимкнено через налаштування")
+		return
+	}
+
 	message := tgbotapi.NewMessage(chatID, fmt.Sprintf("\u2728 *Щоденний звіт*\n\n%s", report))
 	message.ParseMode = "Markdown"
 
