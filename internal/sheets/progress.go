@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"google.golang.org/api/option"
@@ -47,8 +46,7 @@ func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) string {
 }
 
 func getMotivation() string {
-	now := time.Now()
-	hour := now.Hour()
+	hour := time.Now().Hour()
 
 	switch {
 	case hour < 12:
