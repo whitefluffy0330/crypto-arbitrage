@@ -12,8 +12,8 @@ import (
 
 // Service — обгортка над Google Sheets API
 type Service struct {
-	srv           *sheets.Service
-	spreadsheetID string
+	Srv           *sheets.Service
+	SpreadsheetID string
 }
 
 // InitGoogleSheets — створює сервіс Sheets API
@@ -25,19 +25,17 @@ func InitGoogleSheets() *Service {
 		log.Fatalf("Unable to create Sheets service: %v", err)
 	}
 
-	// замінимо на правильний ID з .env
 	return &Service{
-		srv: sheetsService,
+		Srv: sheetsService,
 	}
 }
 
 // SetSpreadsheetID — встановити ID таблиці після ініціалізації
 func (s *Service) SetSpreadsheetID(id string) {
-	s.spreadsheetID = id
+	s.SpreadsheetID = id
 }
 
 // GenerateProgressReport — просто повертає зведення (буде оновлюватись)
 func (s *Service) GenerateProgressReport() string {
-	// Пізніше замінимо на реальні обчислення
-	return fmt.Sprintf("🗓️ %s\nПрогрес: 6%%\nВсе йде за планом!", time.Now().Format("02.01.2006"))
+	return fmt.Sprintf("📊 Звіт за день:\n\nПрогрес: 64%%\nВсе йде за планом!\n\n%s", time.Now().Format("02.01.2006"))
 }
