@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
 
@@ -29,7 +34,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srv := sheets.InitGoogleSheets()
+	ctx := context.Background()
+	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope)
+	if err != nil {
+		log.Fatalf("Помилка авторизації Google Sheets: %v", err)
+	}
+
+	sheetsService, err := sheets.NewService(ctx, option.WithCredentials(credentials))
+	if err != nil {
+		log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err)
+	}
 
 	updates := bot.ListenForWebhook("/webhook")
 	go func() {
@@ -39,7 +53,6 @@ func main() {
 			nil))
 	}()
 
-	telegram.StartEveningReport(bot, srv, cfg.SpreadsheetID, cfg.ChatID)
-
-	telegram.HandleUpdates(updates, bot, srv, cfg)
+	telegram.StartEveningReport(bot, sheetsService, cfg.SpreadsheetID, cfg.ChatID)
+	telegram.HandleUpdates(updates, bot, sheetsService, cfg)
 }
