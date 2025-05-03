@@ -17,6 +17,10 @@ import (
 	"google.golang.org/api/sheets/v4"
 )
 
+func appContext() context.Context {
+	return context.Background()
+}
+
 func main() {
 	cfg := config.LoadEnv()
 
@@ -34,7 +38,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx := appContext()
 	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope)
 	if err != nil {
 		log.Fatalf("Помилка авторизації Google Sheets: %v", err)
