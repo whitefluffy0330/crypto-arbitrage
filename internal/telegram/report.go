@@ -6,13 +6,12 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 )
 
 var eveningReportSent bool
 
-func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID string, chatID int64) {
+func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID string, chatID int64, enableReport bool) {
 	go func() {
 		for {
 			now := time.Now()
@@ -28,7 +27,7 @@ func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID
 			timer := time.NewTimer(duration)
 			<-timer.C
 
-			if !eveningReportSent {
+			if enableReport && !eveningReportSent {
 				report := sheets.GenerateProgressReport(srv, spreadsheetID)
 				SendEveningReport(bot, chatID, report)
 				eveningReportSent = true
@@ -38,12 +37,6 @@ func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID
 }
 
 func SendEveningReport(bot *tgbotapi.BotAPI, chatID int64, report string) {
-	cfg := config.LoadEnv()
-	if !cfg.EnableEveningReport {
-		log.Println("Вечірній звіт вимкнено через налаштування")
-		return
-	}
-
 	message := tgbotapi.NewMessage(chatID, fmt.Sprintf("\u2728 *Щоденний звіт*\n\n%s", report))
 	message.ParseMode = "Markdown"
 
