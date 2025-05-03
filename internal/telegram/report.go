@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	"google.golang.org/api/sheets/v4"
 )
 
 var eveningReportSent bool
@@ -28,7 +28,7 @@ func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID
 			<-timer.C
 
 			if !eveningReportSent {
-				report := sheets.GenerateProgressReport(srv, spreadsheetID)
+				report := GenerateProgressReport(srv, spreadsheetID)
 				SendEveningReport(bot, chatID, report, enableReport)
 				eveningReportSent = true
 			}
