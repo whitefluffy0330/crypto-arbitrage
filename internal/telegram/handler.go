@@ -1,9 +1,9 @@
 package telegram
 
 import (
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/sheets"
-	"github.com/whitefluffy0330/crypto-arbitrage-bot/internal/telegram/goal"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
