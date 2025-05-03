@@ -3,39 +3,25 @@ package sheets
 import (
 	"context"
 	"fmt"
-	"log"
+	"strconv"
 	"time"
 
-	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
 
-// Service — обгортка над Google Sheets API
-type Service struct {
-	Srv           *sheets.Service
-	SpreadsheetID string
-}
-
-// InitGoogleSheets — створює сервіс Sheets API
-func InitGoogleSheets() *Service {
-	ctx := context.Background()
-
-	sheetsService, err := sheets.NewService(ctx, option.WithCredentialsFile("internal/credentials.json"))
+func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) string {
+	// Тут приклад простої реалізації
+	readRange := "A1:B10"
+	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
-		log.Fatalf("Unable to create Sheets service: %v", err)
+		return fmt.Sprintf("Помилка отримання звіту: %v", err)
 	}
 
-	return &Service{
-		Srv: sheetsService,
+	report := "📊 Прогрес:\n"
+	for _, row := range resp.Values {
+		if len(row) >= 2 {
+			report += fmt.Sprintf("- %s: %s\n", row[0], row[1])
+		}
 	}
-}
-
-// SetSpreadsheetID — встановити ID таблиці після ініціалізації
-func (s *Service) SetSpreadsheetID(id string) {
-	s.SpreadsheetID = id
-}
-
-// GenerateProgressReport — просто повертає зведення (буде оновлюватись)
-func (s *Service) GenerateProgressReport() string {
-	return fmt.Sprintf("📊 Звіт за день:\n\nПрогрес: 64%%\nВсе йде за планом!\n\n%s", time.Now().Format("02.01.2006"))
+	return report
 }
