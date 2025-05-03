@@ -1,27 +1,29 @@
 package sheets
 
 import (
-	"context"
 	"fmt"
-	"strconv"
-	"time"
 
 	"google.golang.org/api/sheets/v4"
 )
 
-func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) string {
-	// Тут приклад простої реалізації
-	readRange := "A1:B10"
+func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) (string, error) {
+	readRange := "Arbitrage!A2:B"
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
-		return fmt.Sprintf("Помилка отримання звіту: %v", err)
+		return "", fmt.Errorf("не вдалося отримати дані з Google Sheets: %v", err)
 	}
 
-	report := "📊 Прогрес:\n"
-	for _, row := range resp.Values {
-		if len(row) >= 2 {
-			report += fmt.Sprintf("- %s: %s\n", row[0], row[1])
-		}
+	if len(resp.Values) == 0 {
+		return "Немає даних для звіту.", nil
 	}
-	return report
+
+	report := "📊 *Прогрес за сьогодні:*\n"
+	for _, row := range resp.Values {
+		if len(row) < 2 {
+			continue
+		}
+		report += fmt.Sprintf("▫️ *%s*: %s\n", row[0], row[1])
+	}
+
+	return report, nil
 }
