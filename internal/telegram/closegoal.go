@@ -1,65 +1,30 @@
 package telegram
 
 import (
-	"fmt"
 	"log"
 	"strconv"
-	"time"
-
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"google.golang.org/api/sheets/v4"
 )
 
-var (
-	closingGoalState string
-)
+// HandleCloseGoalInput завершує активну ціль
+func HandleCloseGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *sheets.Service, spreadsheetID string) {
+	userID := strconv.FormatInt(message.Chat.ID, 10)
 
-func HandleCloseGoalCommand(bot *tgbotapi.BotAPI, chatID int64) {
-	closingGoalState = "waiting_final_amount"
-	msg := tgbotapi.NewMessage(chatID, "🎯 Вкажи фактичну суму ($), за яку ти купив ціль:")
-	bot.Send(msg)
-}
-
-func HandleCloseGoalInput(bot *tgbotapi.BotAPI, chatID int64, srv *sheets.Service, spreadsheetID string, text string) {
-	if closingGoalState != "waiting_final_amount" {
-		return
+	// Оновлення статусу цілі
+	writeRange := userID + "!E2" // Припустимо, що в E2 знаходиться статус
+	valueRange := &sheets.ValueRange{
+		Values: [][]interface{}{{"завершено"}},
 	}
-
-	readRange := "Цілі!A2:F"
-	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
-	if err != nil || len(resp.Values) == 0 {
-		bot.Send(tgbotapi.NewMessage(chatID, "🚫 Помилка при читанні таблиці цілей."))
-		return
-	}
-
-	amount, err := strconv.Atoi(text)
+	_, err := srv.Spreadsheets.Values.Update(spreadsheetID, writeRange, valueRange).ValueInputOption("RAW").Do()
 	if err != nil {
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Введи число без символів, напр. 1850"))
+		log.Printf("❌ Не вдалося оновити статус цілі: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Помилка при завершенні цілі.")
+		bot.Send(msg)
 		return
 	}
 
-	for i, row := range resp.Values {
-		if len(row) >= 4 && row[3] == "Активна" {
-			updateRange := fmt.Sprintf("Цілі!C%d:D%d", i+2, i+2)
-			values := [][]interface{}{{amount, "Завершено"}}
-			_, err := srv.Spreadsheets.Values.Update(spreadsheetID, updateRange, &sheets.ValueRange{
-				Values: values,
-			}).ValueInputOption("USER_ENTERED").Do()
-			if err != nil {
-				log.Printf("Помилка оновлення цілі: %v", err)
-			}
-
-			goal.MarkGoalClosed()
-
-			msg := fmt.Sprintf("✅ Ціль успішно закрита! Фактична сума: $%d", amount)
-			bot.Send(tgbotapi.NewMessage(chatID, msg))
-			closingGoalState = ""
-			return
-		}
-	}
-
-	bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Активної цілі не знайдено."))
-	closingGoalState = ""
+	msg := tgbotapi.NewMessage(message.Chat.ID, "✅ Ціль завершено! Гарна робота 💪")
+	bot.Send(msg)
 }
