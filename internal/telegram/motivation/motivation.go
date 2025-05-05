@@ -19,6 +19,7 @@ func InitMotivationSeed() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+// GetMotivationalPhrase повертає випадкову мотиваційну фразу
 func GetMotivationalPhrase() string {
 	return motivationalPhrases[rand.Intn(len(motivationalPhrases))]
 }
