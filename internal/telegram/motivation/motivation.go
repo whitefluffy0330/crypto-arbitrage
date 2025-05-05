@@ -14,7 +14,8 @@ var motivationalPhrases = []string{
 	"Немає нічого неможливого для тебе!",
 }
 
-func init() {
+// InitMotivationSeed ініціалізує генератор випадкових чисел
+func InitMotivationSeed() {
 	rand.Seed(time.Now().UnixNano())
 }
 
