@@ -1,19 +1,14 @@
 package telegram
 
 import (
-	"fmt"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// HandleCloseGoalInput обробляє повідомлення про завершення цілі
-func HandleCloseGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
-	chatID := message.Chat.ID
-	userInput := message.Text
+// CloseUserGoal очищає ціль користувача
+func CloseUserGoal(bot *tgbotapi.BotAPI, chatID int64) {
+	// Видаляємо ціль з пам’яті
+	userGoals[chatID] = ""
 
-	// Тут можна реалізувати логіку для збереження завершеної цілі, якщо потрібно
-	response := fmt.Sprintf("✅ Ціль '%s' успішно закрита!", userInput)
-
-	msg := tgbotapi.NewMessage(chatID, response)
+	msg := tgbotapi.NewMessage(chatID, "✅ Ціль завершено. Готовий рухатись далі!")
 	bot.Send(msg)
 }
