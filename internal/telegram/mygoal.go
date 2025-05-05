@@ -5,17 +5,16 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Тут можна зберігати цілі в пам’яті, або підключити базу/таблицю
-var userGoals = make(map[int64]string)
-
-// HandleMyGoalCommand надсилає користувачу його активну ціль
+// HandleMyGoalCommand відправляє користувачу його активну ціль
 func HandleMyGoalCommand(bot *tgbotapi.BotAPI, chatID int64) {
 	goal, ok := userGoals[chatID]
 	if !ok || goal == "" {
-		bot.Send(tgbotapi.NewMessage(chatID, "😕 У тебе ще немає встановленої цілі."))
+		msg := tgbotapi.NewMessage(chatID, "❌ У вас ще немає встановленої цілі.")
+		bot.Send(msg)
 		return
 	}
 
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("🎯 Твоя поточна ціль: %s", goal))
+	text := fmt.Sprintf("🎯 Ваша поточна ціль: %s", goal)
+	msg := tgbotapi.NewMessage(chatID, text)
 	bot.Send(msg)
 }
