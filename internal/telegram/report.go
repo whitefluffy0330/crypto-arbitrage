@@ -2,24 +2,23 @@ package telegram
 
 import (
 	"fmt"
-	"log"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"google.golang.org/api/sheets/v4"
+
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 )
 
-// HandleProgressReport надсилає звіт користувачу
-func HandleProgressReport(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *sheets.Service, spreadsheetID string) {
-	userID := fmt.Sprintf("%d", message.Chat.ID)
-	reportText, err := sheets.GenerateProgressReport(srv, spreadsheetID, userID)
+// ReportProgress генерує та надсилає звіт користувачу
+func ReportProgress(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *sheets.Service, spreadsheetID string) {
+	chatID := message.Chat.ID
+
+	report, err := sheets.GenerateProgressReport(srv, spreadsheetID)
 	if err != nil {
-		log.Printf("❌ Помилка при генерації звіту: %v", err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Не вдалося згенерувати звіт.")
-		bot.Send(msg)
+		errMsg := fmt.Sprintf("Помилка під час генерації звіту: %v", err)
+		bot.Send(tgbotapi.NewMessage(chatID, errMsg))
 		return
 	}
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, reportText)
-	bot.Send(msg)
+	bot.Send(tgbotapi.NewMessage(chatID, report))
 }
