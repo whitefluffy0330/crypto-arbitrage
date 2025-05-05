@@ -10,7 +10,6 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 )
 
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *sheets.Service, spreadsheetID string) {
