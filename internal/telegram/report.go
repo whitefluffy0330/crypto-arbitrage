@@ -3,51 +3,40 @@ package telegram
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"google.golang.org/api/sheets/v4"
+
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 )
 
-var eveningReportSent bool
-
-func StartEveningReport(bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID string, chatID int64, enableReport bool) {
-	go func() {
-		for {
-			now := time.Now()
-			location := now.Location()
-			evening := time.Date(now.Year(), now.Month(), now.Day(), 22, 0, 0, 0, location)
-
-			if now.After(evening) {
-				evening = evening.Add(24 * time.Hour)
-				eveningReportSent = false
-			}
-
-			duration := evening.Sub(now)
-			timer := time.NewTimer(duration)
-			<-timer.C
-
-			if !eveningReportSent {
-				report := sheets.GenerateProgressReport(srv, spreadsheetID)
-				SendEveningReport(bot, chatID, report, enableReport)
-				eveningReportSent = true
-			}
-		}
-	}()
-}
-
-func SendEveningReport(bot *tgbotapi.BotAPI, chatID int64, report string, enableReport bool) {
-	if !enableReport {
-		log.Println("Вечірній звіт вимкнено через налаштування")
+func SendProgressReport(bot *tgbotapi.BotAPI, chatID int64, srv *sheets.Service, spreadsheetID string) {
+	report, err := sheets.GenerateProgressReport(srv, spreadsheetID)
+	if err != nil {
+		log.Printf("Помилка при генерації звіту: %v", err)
+		bot.Send(tgbotapi.NewMessage(chatID, "Сталася помилка при формуванні звіту 📉"))
 		return
 	}
 
-	message := tgbotapi.NewMessage(chatID, fmt.Sprintf("\u2728 *Щоденний звіт*\n\n%s", report))
-	message.ParseMode = "Markdown"
+	motivation := getMotivationalQuote()
+	messageText := fmt.Sprintf("%s\n\n📈 %s", motivation, report)
 
-	_, err := bot.Send(message)
-	if err != nil {
+	msg := tgbotapi.NewMessage(chatID, messageText)
+	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Не вдалося надіслати звіт: %v", err)
 	}
+}
+
+func getMotivationalQuote() string {
+	quotes := []string{
+		"🚀 Кожен крок — це наближення до мети!",
+		"🔥 Не зупиняйся зараз — ти вже близько!",
+		"🏆 Твоя дисципліна — твоя суперсила!",
+		"📊 Маленький дохід — теж дохід!",
+		"🎯 Вчора — досвід, сьогодні — прогрес.",
+	}
+	rand.Seed(time.Now().UnixNano())
+	return quotes[rand.Intn(len(quotes))]
 }
