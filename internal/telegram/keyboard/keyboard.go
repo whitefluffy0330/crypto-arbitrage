@@ -1,18 +1,24 @@
 package keyboard
 
 import (
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func MainKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+// ShowMainKeyboard показує головну клавіатуру користувачу
+func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("🚀 Почати робочий день"),
-			tgbotapi.NewKeyboardButton("🛑 Завершити робочий день"),
+			tgbotapi.NewKeyboardButton("🎯 Моя ціль"),
+			tgbotapi.NewKeyboardButton("🔁 Старт"),
+			tgbotapi.NewKeyboardButton("⛔️ Стоп"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("📅 Вихідний"),
-			tgbotapi.NewKeyboardButton("🎯 Моя ціль"),
+			tgbotapi.NewKeyboardButton("🏖 Вихідний"),
+			tgbotapi.NewKeyboardButton("📊 Прогрес"),
 		),
 	)
+
+	msg := tgbotapi.NewMessage(chatID, "Оберіть опцію з меню:")
+	msg.ReplyMarkup = keyboard
+	bot.Send(msg)
 }
