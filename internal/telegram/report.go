@@ -1,22 +1,16 @@
 package telegram
 
 import (
-	"log"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"google.golang.org/api/sheets/v4"
-
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
+	"google.golang.org/api/sheets/v4"
 )
 
-// ReportProgress генерує звіт про дохід і надсилає його користувачу
 func ReportProgress(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *sheets.Service, spreadsheetID string) {
-	reportText := sheets.GenerateProgressReport(srv, spreadsheetID)
+	reportText := "Поки що звіт недоступний (функція в розробці)"
 
 	response := tgbotapi.NewMessage(msg.Chat.ID, reportText)
-	if _, err := bot.Send(response); err != nil {
-		log.Printf("Помилка надсилання звіту: %v", err)
-	}
+	bot.Send(response)
 }
