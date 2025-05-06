@@ -5,17 +5,15 @@ import (
 	"sync" // Для sync.RWMutex
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	// Імпорт google.golang.org/api/sheets/v4 потрібен тут,
-	// якщо HandleUpdates або інші функції цього пакету безпосередньо використовують тип sheets.Service
-	// або його методи. Наразі він використовується для типу параметра srv.
-	"google.golang.org/api/sheets/v4"
+	// Використовуємо аліас gsheets, щоб було зрозуміло, що srv - це сервіс Google API
+	gsheets "google.golang.org/api/sheets/v4"
 )
 
 // userGoals зберігатиме цілі користувачів.
-// Ключ: chatID, Значення: опис цілі (string) або структура цілі.
+// Ключ: chatID, Значення: опис цілі (string) або ваша структура для цілі.
 // Доступ до цієї мапи має бути синхронізований.
 var (
-	userGoals      = make(map[int64]string) // Приклад: map[chatID]goalDescription
+	userGoals      = make(map[int64]string) // Приклад: map[chatID]goalDescription.
 	userGoalsMutex sync.RWMutex
 )
 
@@ -27,13 +25,14 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) {
 		log.Printf("Помилка створення екземпляра бота: %v", err)
 		return nil, err
 	}
-	log.Printf("✅ Telegram бот екземпляр створено для @%s", bot.Self.UserName)
+	// Можна залишити логування тут або перенести в main.go після успішної ініціалізації
+	// log.Printf("✅ Telegram бот екземпляр створено для @%s", bot.Self.UserName)
 	return bot, nil
 }
 
 // HandleUpdates отримує оновлення з каналу (який надається слухачем вебхуків у main.go)
-// та передає кожне оновлення до HandleUpdate (в однині).
-func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID string) {
+// та передає кожне оновлення до HandleUpdate (в однині, визначеної в handler.go).
+func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, spreadsheetID string) {
 	log.Println("Розпочато обробку оновлень...")
 	for update := range updates {
 		// Викликаємо HandleUpdate (визначену в handler.go, той самий пакет)
@@ -55,32 +54,42 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	log.Printf("Встановлення вебхука на: %s", fullWebhookURL)
 
 	var whCfg tgbotapi.WebhookConfig
+	var errWh error // Оголошуємо змінну для помилки від NewWebhook*
+
 	if certFilePath != "" {
 		// Використовуйте це, якщо потрібно завантажити файл публічного сертифіката в Telegram
-		// (наприклад, для самопідписаних сертифікатів).
-		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
+		whCfg, errWh = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
 	} else {
-		// Використовуйте це, якщо ваш HTTPS-ендпоінт налаштований з сертифікатом від надійного CA (наприклад, Let's Encrypt).
-		whCfg = tgbotapi.NewWebhook(fullWebhookURL)
+		// Використовуйте це, якщо ваш HTTPS-ендпоінт налаштований з сертифікатом від надійного CA
+		whCfg, errWh = tgbotapi.NewWebhook(fullWebhookURL)
+	}
+
+	// Перевіряємо помилку після виклику NewWebhook*
+	if errWh != nil {
+		log.Printf("Помилка створення конфігурації вебхука: %v", errWh)
+		return errWh // Повертаємо помилку
 	}
 
 	// Тут можна встановити AllowedUpdates, якщо ви хочете фільтрувати типи оновлень
 	// whCfg.AllowedUpdates = []string{"message", "callback_query"}
 
-	_, err := bot.Request(whCfg)
-	if err != nil {
-		log.Printf("Помилка встановлення вебхука: %v", err)
-		return err
+	// Використовуємо нову змінну для помилки від bot.Request, щоб не затерти errWh
+	_, errReq := bot.Request(whCfg)
+	if errReq != nil {
+		log.Printf("Помилка встановлення вебхука (bot.Request): %v", errReq)
+		return errReq
 	}
 
-	// Опціонально, перевірити інформацію про вебхук
-	info, err := bot.GetWebhookInfo()
-	if err != nil {
-		log.Printf("Помилка отримання інформації про вебхук: %v", err)
-		// Не повертаємо помилку тут, оскільки вебхук міг встановитися, але інформацію отримати не вдалося
+	info, errInfo := bot.GetWebhookInfo()
+	if errInfo != nil {
+		log.Printf("Помилка отримання інформації про вебхук: %v", errInfo)
+		// Можна не повертати помилку тут, оскільки вебхук міг встановитися,
+		// але інформацію отримати не вдалося. Це не критично для роботи.
 	} else {
 		if info.LastErrorDate != 0 {
-			log.Printf("Помилка зворотного виклику Telegram (вебхук): %s. URL: %s", info.LastErrorMessage, info.URL)
+			log.Printf("Помилка останнього зворотного виклику Telegram (вебхук): %s. URL: %s", info.LastErrorMessage, info.URL)
+		} else if info.URL == "" {
+			log.Printf("Вебхук встановлено, але URL порожній. Перевірте налаштування.")
 		} else {
 			log.Printf("Вебхук успішно встановлено. URL: %s", info.URL)
 		}
@@ -92,9 +101,4 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
-		log.Printf("Помилка видалення вебхука: %v", err)
-		return err
-	}
-	log.Println("Вебхук успішно видалено.")
-	return nil
-}
+		log.
