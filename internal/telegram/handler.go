@@ -4,7 +4,7 @@ import (
 	"log"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"google.golang.org/api/sheets/v4"
+	sheetsAPI "google.golang.org/api/sheets/v4"
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
@@ -12,11 +12,11 @@ import (
 )
 
 // HandleUpdate обробляє повідомлення та callback-и
-func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *sheets.Service, spreadsheetID string) {
+func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *sheetsAPI.Service, spreadsheetID string) {
 	if update.Message != nil {
 		switch update.Message.Text {
 		case "/start":
-			keyboard.ShowMainKeyboard(bot, update.Message.Chat.ID)
+			keyboard.ShowMainKeyboard(bot, nil, update.Message.Chat.ID)
 		case "Почати роботу":
 			commands.StartWork(bot, update.Message)
 		case "Завершити роботу":
@@ -28,7 +28,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *sheets.Serv
 		case "Звіт":
 			ReportProgress(bot, update.Message, srv, spreadsheetID)
 		default:
-			keyboard.ShowMainKeyboard(bot, update.Message.Chat.ID)
+			keyboard.ShowMainKeyboard(bot, nil, update.Message.Chat.ID)
 		}
 	}
 
