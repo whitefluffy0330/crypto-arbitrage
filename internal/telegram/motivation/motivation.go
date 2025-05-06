@@ -2,7 +2,7 @@ package motivation
 
 import (
 	"math/rand"
-	"time"
+	"time" // Потрібен для time.Now().UnixNano()
 )
 
 var motivationalPhrases = []string{
@@ -14,12 +14,18 @@ var motivationalPhrases = []string{
 	"Немає нічого неможливого для тебе!",
 }
 
-// InitMotivationSeed ініціалізує генератор випадкових чисел
+// InitMotivationSeed ініціалізує генератор випадкових чисел.
+// Цю функцію потрібно викликати один раз при старті програми (наприклад, з main.go).
 func InitMotivationSeed() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// GetMotivationalPhrase повертає випадкову мотиваційну фразу
-func GetMotivationalPhrase() string {
+// GetRandomMotivation повертає випадкову мотиваційну фразу.
+// Назва функції змінена з GetMotivationalPhrase для відповідності виклику в handler.go.
+func GetRandomMotivation() string {
+	if len(motivationalPhrases) == 0 {
+		// Запасний варіант, якщо з якихось причин список фраз порожній
+		return "Все вийде, головне — не здавайся!"
+	}
 	return motivationalPhrases[rand.Intn(len(motivationalPhrases))]
 }
