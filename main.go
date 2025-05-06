@@ -4,57 +4,70 @@ import (
 	"context"
 	"log"
 	"net/http"
-	// "time" // Можливо, time вже не потрібен тут безпосередньо
+	// "time" // Наразі не використовується тут безпосередньо
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Для sheets.SpreadsheetsScope
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
-	// Імпортуйте пакет motivation, якщо InitMotivationSeed буде тут
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Для InitMotivationSeed
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
-	gsheets "google.golang.org/api/sheets/v4" // Перейменовано, щоб уникнути конфлікту з вашим пакетом sheets
+	gsheets "google.golang.org/api/sheets/v4" // Перейменовано імпорт, щоб уникнути конфлікту з вашим пакетом sheets
 )
 
-// appContext залишається без змін, якщо потрібен
+// appContext повертає фоновий контекст.
 func appContext() context.Context {
 	return context.Background()
 }
 
 func main() {
+	// 1. Ініціалізація насіння для генератора випадкових чисел (для мотиваційних фраз)
+	motivation.InitMotivationSeed()
+
+	// 2. Завантаження конфігурації
 	cfg := config.LoadEnv()
 
-	// Ініціалізація насіння для мотиваційних фраз
-	motivation.InitMotivationSeed() // <--- ВАЖЛИВО: Додайте цей виклик
-
-	if cfg.BotToken == "" || cfg.SpreadsheetID == "" || cfg.ChatID == 0 { // ChatID може бути не потрібен для загального запуску, а для конкретних повідомлень
-		log.Fatal("Не задані обов'язкові змінні середовища (TELEGRAM_TOKEN, SPREADSHEET_ID)")
+	// 3. Перевірка обов'язкових конфігураційних параметрів
+	// cfg.ChatID може бути не потрібен для загального запуску, а для конкретних повідомлень (наприклад, звітів конкретному адміну)
+	if cfg.BotToken == "" || cfg.SpreadsheetID == "" {
+		log.Fatal("Критична помилка: Не задані обов'язкові змінні середовища TELEGRAM_TOKEN та SPREADSHEET_ID")
 	}
+	// Якщо cfg.ChatID використовується для чогось глобального, залиште перевірку:
+	// if cfg.ChatID == 0 {
+	// 	log.Fatal("Критична помилка: Не задана змінна середовища TELEGRAM_CHAT_ID")
+	// }
 
-	bot, err := telegram.InitBot(cfg.BotToken) // Використовуємо оновлену InitBot
+
+	// 4. Ініціалізація Telegram бота (використовуємо спрощену функцію з пакета telegram)
+	bot, err := telegram.InitBot(cfg.BotToken)
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
 
-	// Налаштування та встановлення Webhook
-	// Ці значення мають надходити з конфігурації або бути визначені
-	webhookBaseURL := "https://vadymnewchapter.pp.ua" // ВАШ ДОМЕН
-	webhookPath := "/webhook_" + bot.Token            // Унікальний шлях, щоб ніхто інший його не знав
-	// certFilePath := "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem" // Потрібно, лише якщо NewWebhookWithCert
-	certFilePath := "" // Залиште порожнім, якщо у вас Let's Encrypt і сервер налаштований правильно
+	// 5. Налаштування та встановлення Webhook
+	// TODO: Розгляньте можливість винесення цих URL та шляхів до сертифікатів у конфігурацію (cfg)
+	webhookBaseURL := "https://vadymnewchapter.pp.ua" // ВАШ ПУБЛІЧНИЙ ДОМЕН З HTTPS
+	// Створюємо унікальний шлях для вебхука, щоб його було важче вгадати. Можна додати частину токена.
+	webhookPath := "/webhook_" + bot.Token 
+	
+	// Шлях до публічного сертифіката для Telegram (якщо потрібен для NewWebhookWithCert).
+	// Для Let's Encrypt, якщо сервер правильно налаштований, Telegram зазвичай не потребує цього,
+	// тому можна передавати порожній рядок.
+	// certFilePath := "/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem"
+	certFilePath := "" // Залиште порожнім для Let's Encrypt з надійним CA
 
-	// Встановлюємо вебхук (використовуючи функцію з пакета telegram)
 	err = telegram.SetWebhook(bot, webhookBaseURL, webhookPath, certFilePath)
 	if err != nil {
 		log.Fatalf("Помилка встановлення вебхука: %v", err)
 	}
 
+	// 6. Ініціалізація клієнта Google Sheets
 	ctx := appContext()
-	// Переконайтеся, що змінна середовища GOOGLE_APPLICATION_CREDENTIALS встановлена правильно
-	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) // sheets.SpreadsheetsScope з вашого пакету
+	// Переконайтеся, що змінна середовища GOOGLE_APPLICATION_CREDENTIALS правильно встановлена на вашому сервері
+	// і вказує на файл з ключами, який знаходиться ПОЗА репозиторієм.
+	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) // Використовуємо sheets.SpreadsheetsScope з вашого пакета
 	if err != nil {
 		log.Fatalf("Помилка авторизації Google Sheets (перевірте GOOGLE_APPLICATION_CREDENTIALS): %v", err)
 	}
@@ -64,27 +77,31 @@ func main() {
 		log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err)
 	}
 
-	// Слухаємо оновлення, що надходять на вебхук
-	// ListenForWebhook реєструє обробник на http.DefaultServeMux
-	updates := bot.ListenForWebhook(webhookPath) // Шлях має точно співпадати з тим, що встановлено у SetWebhook
+	// 7. Отримання оновлень від Telegram (канал updates)
+	// bot.ListenForWebhook реєструє обробник на http.DefaultServeMux для шляху webhookPath
+	updates := bot.ListenForWebhook(webhookPath) // Шлях має ТОЧНО співпадати з тим, що встановлено у SetWebhook
 
-	// Запуск HTTPS сервера для вебхука
+	// 8. Запуск HTTPS сервера для приймання запитів від Telegram
 	go func() {
 		log.Printf("Запуск HTTPS сервера для вебхука на порту 443, шлях: %s", webhookPath)
-		// Шляхи до сертифікатів Let's Encrypt - переконайтеся, що вони правильні
-		// і доступні для читання вашим застосунком.
-		// Розгляньте можливість винесення шляхів до сертифікатів у конфігурацію.
-		err := http.ListenAndServeTLS(":443", // Або інший порт, якщо у вас є реверс-проксі типу Nginx
+		// TODO: Розгляньте можливість винесення шляхів до сертифікатів у конфігурацію.
+		// Переконайтеся, що ці шляхи правильні та файл сертифіката/ключа доступний для читання.
+		// Для роботи на стандартному порту 443 потрібні права суперкористувача,
+		// або використовуйте реверс-проксі (наприклад, Nginx), який слухає 443 і перенаправляє на інший порт вашого застосунку.
+		err_https := http.ListenAndServeTLS(":443",
 			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem",
 			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem",
-			nil) // nil означає використання http.DefaultServeMux, де ListenForWebhook реєструє свій обробник
-		if err != nil {
-			log.Fatalf("Помилка запуску HTTPS сервера: %v", err)
+			nil) // nil означає використання http.DefaultServeMux
+		if err_https != nil {
+			log.Fatalf("Помилка запуску HTTPS сервера: %v", err_https)
 		}
 	}()
 
-	// telegram.StartEveningReport(bot, sheetsService, cfg.SpreadsheetID, cfg.ChatID) // Цю функцію ми ще не бачили
+	log.Printf("Бот @%s готовий до роботи та очікує на оновлення через вебхук...", bot.Self.UserName)
 
-	// Передаємо cfg.SpreadsheetID замість всього cfg
+	// 9. Запуск функції для вечірніх звітів (якщо вона є та потрібна)
+	// telegram.StartEveningReport(bot, sheetsService, cfg.SpreadsheetID, cfg.ChatID) // Ми ще не бачили реалізацію цієї функції
+
+	// 10. Передача оновлень на обробку в головний цикл (передаємо cfg.SpreadsheetID)
 	telegram.HandleUpdates(updates, bot, sheetsService, cfg.SpreadsheetID)
 }
