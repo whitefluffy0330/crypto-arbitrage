@@ -10,12 +10,12 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Для InitMotivationSeed
 
-	// Ось цей імпорт, який зараз викликає помилку
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
+	// Ось цей імпорт, з яким виникала помилка
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
-	gsheets "google.golang.org/api/sheets/v4" 
+	gsheets "google.golang.org/api/sheets/v4"
 )
 
 func appContext() context.Context {
@@ -24,6 +24,9 @@ func appContext() context.Context {
 
 func main() {
 	motivation.InitMotivationSeed()
+
+	// ДІАГНОСТИЧНИЙ РЯДОК: Явне використання пакета tgbotapi
+	var _ tgbotapi.Update // Цей рядок додано для явної вказівки компілятору, що пакет використовується
 
 	cfg := config.LoadEnv()
 
@@ -36,15 +39,13 @@ func main() {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
 
-	// Використовуємо bot (типу *tgbotapi.BotAPI)
 	log.Printf("Бот @%s ініціалізовано.", bot.Self.UserName)
 
+	webhookBaseURL := "https://vadymnewchapter.pp.ua"
+	webhookPath := "/webhook_" + bot.Token
+	certFilePath := "" // Залиште порожнім для Let's Encrypt з надійним CA
 
-	webhookBaseURL := "https://vadymnewchapter.pp.ua" 
-	webhookPath := "/webhook_" + bot.Token            
-	certFilePath := "" 
-
-	err = telegram.SetWebhook(bot, webhookBaseURL, webhookPath, certFilePath) // bot передається сюди
+	err = telegram.SetWebhook(bot, webhookBaseURL, webhookPath, certFilePath)
 	if err != nil {
 		log.Fatalf("Помилка встановлення вебхука: %v", err)
 	}
@@ -60,15 +61,14 @@ func main() {
 		log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err)
 	}
 
-	// bot.ListenForWebhook повертає tgbotapi.UpdatesChannel
-	updates := bot.ListenForWebhook(webhookPath) 
+	updates := bot.ListenForWebhook(webhookPath) // bot.ListenForWebhook повертає tgbotapi.UpdatesChannel
 
 	go func() {
 		log.Printf("Запуск HTTPS сервера для вебхука на порту 443, шлях: %s", webhookPath)
 		err_https := http.ListenAndServeTLS(":443",
 			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/fullchain.pem",
 			"/etc/letsencrypt/live/vadymnewchapter.pp.ua/privkey.pem",
-			nil) 
+			nil)
 		if err_https != nil {
 			log.Fatalf("Помилка запуску HTTPS сервера: %v", err_https)
 		}
@@ -78,6 +78,5 @@ func main() {
 
 	// telegram.StartEveningReport(bot, sheetsService, cfg.SpreadsheetID, cfg.ChatID) // Закоментовано, поки не реалізовано
 
-	// updates (типу tgbotapi.UpdatesChannel) та bot (типу *tgbotapi.BotAPI) передаються сюди
-	telegram.HandleUpdates(updates, bot, sheetsService, cfg.SpreadsheetID) 
+	telegram.HandleUpdates(updates, bot, sheetsService, cfg.SpreadsheetID)
 }
