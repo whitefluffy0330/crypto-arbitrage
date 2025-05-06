@@ -7,6 +7,8 @@ import (
 	sheetsAPI "google.golang.org/api/sheets/v4"
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
 
 // ReportProgress генерує звіт про дохід і надсилає його користувачу
