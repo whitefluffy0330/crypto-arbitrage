@@ -89,7 +89,8 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 		if info.LastErrorDate != 0 {
 			log.Printf("Помилка останнього зворотного виклику Telegram (вебхук): %s. URL: %s", info.LastErrorMessage, info.URL)
 		} else if info.URL == "" {
-			log.Printf("Вебхук встановлено, але URL порожній. Перевірте налаштування.")
+			// Це може статися, якщо вебхук був видалений або ще не повністю встановлений
+			log.Printf("Вебхук оброблено, але URL порожній. Перевірте налаштування або GetWebhookInfo() пізніше.")
 		} else {
 			log.Printf("Вебхук успішно встановлено. URL: %s", info.URL)
 		}
@@ -101,4 +102,30 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
-		log.
+		log.Printf("Помилка видалення вебхука: %v", err)
+		return err
+	}
+	log.Println("Вебхук успішно видалено.")
+	return nil
+}
+
+// TODO: Далі можуть бути функції для роботи з userGoals, наприклад:
+// func GetUserGoal(chatID int64) (string, bool) {
+//	 userGoalsMutex.RLock()
+//	 defer userGoalsMutex.RUnlock()
+//	 goal, exists := userGoals[chatID]
+//	 return goal, exists
+// }
+//
+// func SetUserGoal(chatID int64, goalText string) {
+//	 userGoalsMutex.Lock()
+//	 defer userGoalsMutex.Unlock()
+//	 userGoals[chatID] = goalText
+// }
+//
+// func DeleteUserGoal(chatID int64) {
+//	 userGoalsMutex.Lock()
+//	 defer userGoalsMutex.Unlock()
+//	 delete(userGoals, chatID)
+// }
+// Ми реалізуємо їх пізніше, коли будемо працювати над логікою цілей.
