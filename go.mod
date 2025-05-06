@@ -34,3 +34,12 @@ require (
 	google.golang.org/grpc v1.63.2 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 )
+
+// Повертаємо replace директиви для стабільної роботи на сервері зараз
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/config => ./internal/config
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/sheets => ./internal/sheets
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram => ./internal/telegram
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands => ./internal/telegram/commands
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal => ./internal/telegram/goal
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard => ./internal/telegram/keyboard
+replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation => ./internal/telegram/motivation
