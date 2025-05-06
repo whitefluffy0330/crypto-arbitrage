@@ -28,17 +28,9 @@ require (
 	go.opentelemetry.io/otel/trace v1.24.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect  // Використовую версію, яку ви надали в одному з прикладів go.mod
 	golang.org/x/text v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240429193739-8cf5692501f6 // indirect
 	google.golang.org/grpc v1.63.2 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 )
-
-replace github.com/whitefluffy0330/crypto-arbitrage/internal/config => ./internal/config
-
-replace github.com/whitefluffy0330/crypto-arbitrage/internal/sheets => ./internal/sheets
-
-replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram => ./internal/telegram
-
-replace github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal => ./internal/telegram/goal
