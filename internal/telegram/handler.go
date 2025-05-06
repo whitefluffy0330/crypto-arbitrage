@@ -1,4 +1,4 @@
-package telegram
+\package telegram
 
 import (
 	"log"
@@ -9,30 +9,15 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 )
 
-// HandleUpdate обробляє повідомлення та callback-и
-func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *sheetsAPI.Service, spreadsheetID string) {
-	if update.Message != nil {
-		switch update.Message.Text {
-		case "/start":
-			keyboard.ShowMainKeyboard(bot, nil, update.Message.Chat.ID)
-		case "Почати роботу":
-			commands.StartWork(bot, update.Message)
-		case "Завершити роботу":
-			commands.StopWork(bot, update.Message)
-		case "Взяти вихідний":
-			commands.DayOff(bot, update.Message, srv, spreadsheetID)
-		case "Моя ціль":
-			goal.HandleMyGoalCommand(bot, update.Message.Chat.ID)
-		case "Звіт":
-			ReportProgress(bot, update.Message, srv, spreadsheetID)
-		default:
-			keyboard.ShowMainKeyboard(bot, nil, update.Message.Chat.ID)
-		}
-	}
+// ReportProgress генерує звіт про дохід і надсилає його користувачу
+func ReportProgress(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *sheetsAPI.Service, spreadsheetID string) {
+	reportText := sheets.GenerateProgressReport(srv, spreadsheetID)
 
-	if update.CallbackQuery != nil {
-		goal.HandleCallback(bot, update.CallbackQuery)
+	response := tgbotapi.NewMessage(msg.Chat.ID, reportText)
+	if _, err := bot.Send(response); err != nil {
+		log.Printf("Помилка надсилання звіту: %v", err)
 	}
 }
