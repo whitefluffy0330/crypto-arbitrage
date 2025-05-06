@@ -2,32 +2,40 @@ package telegram
 
 import (
 	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-	"google.golang.org/api/sheets/v4"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
+	"log"
 )
 
-func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *sheets.Service, spreadsheetID string) {
+func HandleUpdate(update tgbotapi.Update, bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID string) {
 	if update.Message != nil {
-		switch update.Message.Text {
-		case "Старт":
-			commands.StartWork(bot, update.Message)
-		case "Завершити":
-			commands.StopWork(bot, update.Message)
-		case "Вихідний":
-			commands.DayOff(bot, update.Message, srv, spreadsheetID)
-		case "Моя ціль":
-			goal.HandleMyGoalCommand(bot, update.Message.Chat.ID, srv, spreadsheetID)
-		case "Звіт":
-			ReportProgress(bot, update.Message, srv, spreadsheetID)
-		default:
-			motivationText := motivation.GetRandomMotivation()
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, motivationText)
-			bot.Send(msg)
+		msg := update.Message
 
-			keyboard.ShowMainKeyboard(bot, update.Message.Chat.ID)
+		switch msg.Text {
+		case "/start":
+			welcome := "Привіт! Надішли свою ціль або обери дію з меню ⬇️"
+			keyboard.ShowMainKeyboard(bot, msg.Chat.ID, welcome)
+
+		case "Я працюю 💼":
+			commands.StartWork(bot, msg)
+
+		case "Я завершив роботу 📤":
+			commands.StopWork(bot, msg)
+
+		case "Сьогодні вихідний 🧘‍♂️":
+			commands.DayOff(bot, msg, srv, spreadsheetID)
+
+		case "Моя ціль 🎯":
+			goal.HandleMyGoalCommand(bot, msg.Chat.ID)
+
+		case "Звіт за день 📊":
+			ReportProgress(bot, msg, srv, spreadsheetID)
+
+		default:
+			motiv := motivation.GetRandomMotivation()
+			keyboard.ShowMainKeyboard(bot, msg.Chat.ID, motiv)
 		}
 	}
 
