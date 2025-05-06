@@ -1,32 +1,30 @@
 package telegram
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"os"
+	"log"
+
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	"google.golang.org/api/sheets/v4"
 )
 
-type TelegramMessage struct {
-	ChatID string `json:"chat_id"`
-	Text   string `json:"text"`
+func InitBot(token string) (*tgbotapi.BotAPI, tgbotapi.UpdatesChannel, error) {
+	bot, err := tgbotapi.NewBotAPI(token)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+
+	updates := bot.GetUpdatesChan(u)
+	log.Printf("✅ Telegram бот запущений: @%s", bot.Self.UserName)
+
+	return bot, updates, nil
 }
 
-func SendTelegramMessage(message string) error {
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	chatID := os.Getenv("TELEGRAM_CHAT_ID")
-
-	msg := TelegramMessage{
-		ChatID: chatID,
-		Text:   message,
+func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *sheets.Service, spreadsheetID string) {
+	for update := range updates {
+		HandleUpdate(update, bot, srv, spreadsheetID)
 	}
-
-	msgBytes, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-
-	tgURL := "https://api.telegram.org/bot" + botToken + "/sendMessage"
-	_, err = http.Post(tgURL, "application/json", bytes.NewBuffer(msgBytes))
-	return err
 }
