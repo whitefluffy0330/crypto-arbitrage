@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"time"
+	// "strings" // Видалено цей імпорт, оскільки він не використовувався
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4" // Використовуємо sheets для прямого посилання на типи API
@@ -39,16 +39,13 @@ type FinancialGoalData struct {
 
 // findRowIndexByDate знаходить індекс рядка (1-based) на аркуші за датою в першій колонці (A).
 // Повертає індекс рядка або -1, якщо не знайдено.
-// Припускає, що sheetData містить дані, починаючи з другого рядка аркуша (після заголовка).
 func findRowIndexByDate(sheetData [][]interface{}, dateToFind string) int {
 	if len(sheetData) == 0 {
 		return -1
 	}
-	// Якщо ваш readRange починався з A1 і містить заголовок, індекс буде i + 1.
-	// Якщо readRange починався з A2 (без заголовка), індекс буде i + 2 (бо Sheets 1-based).
-	// Ми читаємо A:A, тому Values[0] - це A1. Починаємо шукати з другого рядка (i=1).
+	// Припускаємо, що Values[0] - це заголовок, шукаємо з i=1
 	for i, row := range sheetData {
-		if i == 0 { continue } // Пропускаємо заголовок (рядок 1)
+		if i == 0 { continue } // Пропускаємо заголовок (рядок 1 аркуша)
 		if len(row) > 0 {
 			if fmt.Sprintf("%v", row[0]) == dateToFind {
 				return i + 1 // Повертаємо 1-based індекс рядка
@@ -84,6 +81,7 @@ func NewService(credentialsJSON []byte) (*sheets.Service, error) {
 func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) (SheetRowData, error) {
 	readRange := "Звіт!A2:E2"
 	var data SheetRowData
+	var err error // Оголошуємо змінну err
 
 	log.Printf("Спроба читання даних з Google Sheets: SpreadsheetID=%s, Range=%s", spreadsheetID, readRange)
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
@@ -99,14 +97,30 @@ func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) (SheetRow
 	}
 
 	row := resp.Values[0]
+	// Покращена обробка помилок парсингу
 	if len(row) > 0 { data.Date = fmt.Sprintf("%v", row[0]) }
-	if len(row) > 1 { incomeStr := fmt.Sprintf("%v", row[1]); data.Income, _ = strconv.ParseFloat(incomeStr, 64) }
-	if len(row) > 2 { sheetGoalStr := fmt.Sprintf("%v", row[2]); data.SheetGoal, _ = strconv.ParseFloat(sheetGoalStr, 64) }
-	if len(row) > 3 { sheetDaysLeftStr := fmt.Sprintf("%v", row[3]); data.SheetDaysLeft, _ = strconv.Atoi(sheetDaysLeftStr) }
-	if len(row) > 4 { sheetReqDailyStr := fmt.Sprintf("%v", row[4]); data.SheetReqDaily, _ = strconv.ParseFloat(sheetReqDailyStr, 64) }
-	
+	if len(row) > 1 { 
+		incomeStr := fmt.Sprintf("%v", row[1])
+		data.Income, err = strconv.ParseFloat(incomeStr, 64)
+		if err != nil { log.Printf("Помилка парсингу доходу '%s': %v", incomeStr, err) /* Можна встановити 0 */ }
+	}
+	if len(row) > 2 {
+		sheetGoalStr := fmt.Sprintf("%v", row[2])
+		data.SheetGoal, err = strconv.ParseFloat(sheetGoalStr, 64)
+		if err != nil { log.Printf("Помилка парсингу мети з таблиці '%s': %v", sheetGoalStr, err) }
+	}
+	if len(row) > 3 {
+		sheetDaysLeftStr := fmt.Sprintf("%v", row[3])
+		data.SheetDaysLeft, err = strconv.Atoi(sheetDaysLeftStr)
+		if err != nil { log.Printf("Помилка парсингу 'днів залишилося' з таблиці '%s': %v", sheetDaysLeftStr, err) }
+	}
+	if len(row) > 4 {
+		sheetReqDailyStr := fmt.Sprintf("%v", row[4])
+		data.SheetReqDaily, err = strconv.ParseFloat(sheetReqDailyStr, 64)
+		if err != nil { log.Printf("Помилка парсингу 'потрібно щодня' з таблиці '%s': %v", sheetReqDailyStr, err) }
+	}
 	log.Printf("Дані з аркуша 'Звіт' успішно розпарсені: %+v", data)
-	return data, nil
+	return data, nil // Повертаємо nil як помилку, якщо парсинг пройшов (навіть якщо були помилки окремих полів, ми їх залогували)
 }
 
 // AddGoalToSheet додає нову ціль на аркуш "МоїЦілі"
@@ -114,7 +128,6 @@ func AddGoalToSheet(srv *sheets.Service, spreadsheetID string, chatID int64, goa
 	sheetName := "МоїЦілі"
 	log.Printf("Додавання цілі на аркуш '%s' для ChatID %d: %+v", sheetName, chatID, goalData)
 	
-	// A: ChatID, B: Amount, C: Currency, D: Days, E: SetDate, F: Status, G: OriginalText, H: ClosedDate
 	var row []interface{}
 	row = append(row, chatID, goalData.Amount, goalData.Currency, goalData.Days,
 		goalData.SetDate.Format("2006-01-02"), "Активна", goalData.OriginalText, "")
@@ -138,36 +151,36 @@ func UpdateGoalStatusInSheet(srv *sheets.Service, spreadsheetID string, chatID i
 	sheetName := "МоїЦілі"
 	log.Printf("Оновлення статусу цілі на '%s' на аркуші '%s' для ChatID %d", newStatus, sheetName, chatID)
 
-	readRange := fmt.Sprintf("%s!A:F", sheetName) // Читаємо до колонки статусу F
+	// Читаємо колонки ChatID (A) та Status (F), щоб знайти рядок
+	readRange := fmt.Sprintf("%s!A:F", sheetName) 
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
 		log.Printf("Помилка читання даних з аркуша '%s' для оновлення статусу (ChatID %d): %v", sheetName, chatID, err)
 		return fmt.Errorf("не вдалося прочитати дані для оновлення статусу: %w", err)
 	}
 
-	targetRowIndex := -1 // 1-based індекс рядка на аркуші
+	targetRowIndex := -1 
 	if len(resp.Values) > 0 {
-		// Шукаємо ЗНИЗУ ВГОРУ, щоб знайти останню активну ціль, якщо їх кілька
-		for i := len(resp.Values) - 1; i >= 0; i-- {
+		for i := len(resp.Values) - 1; i >= 0; i-- { // Шукаємо знизу вгору
 			row := resp.Values[i]
-			// Перевіряємо, чи це не заголовок (про всяк випадок) і чи достатньо колонок
+			// Припускаємо, що перший рядок (i=0) - це заголовок, пропускаємо його.
+			// Також перевіряємо, що є достатньо колонок.
 			if i == 0 || len(row) < 6 { continue } 
 			
-			rowChatIDStr := fmt.Sprintf("%v", row[0]) // Колонка A - ChatID
-			rowStatusStr := fmt.Sprintf("%v", row[5]) // Колонка F - Status
+			rowChatIDStr := fmt.Sprintf("%v", row[0]) 
+			rowStatusStr := fmt.Sprintf("%v", row[5]) 
 			rowChatID, _ := strconv.ParseInt(rowChatIDStr, 10, 64)
 
 			if rowChatID == chatID && rowStatusStr == "Активна" {
-				targetRowIndex = i + 1 // Номер рядка в Google Sheets (1-based)
-				break // Знайшли останню активну, виходимо
+				targetRowIndex = i + 1 // 1-based індекс рядка на аркуші
+				break 
 			}
 		}
 	}
 
 	if targetRowIndex == -1 {
 		log.Printf("Не знайдено активної цілі для ChatID %d на аркуші '%s' для оновлення статусу.", chatID, sheetName)
-		// Не повертаємо помилку, можливо користувач вже закрив ціль вручну або не мав активної
-		return nil 
+		return nil // Не знайдено активної цілі - не є помилкою самої операції
 	}
 
 	// Оновлюємо статус (колонка F)
@@ -177,25 +190,22 @@ func UpdateGoalStatusInSheet(srv *sheets.Service, spreadsheetID string, chatID i
 		ValueInputOption("USER_ENTERED").Do()
 	if err != nil {
 		log.Printf("Помилка оновлення статусу цілі на аркуші '%s' для ChatID %d (рядок %d): %v", sheetName, chatID, targetRowIndex, err)
-		// Повертаємо помилку, бо не вдалося оновити статус
 		return fmt.Errorf("не вдалося оновити статус цілі: %w", err)
 	}
 
 	// Оновлюємо дату закриття (колонка H)
 	closedDateUpdateRange := fmt.Sprintf("%s!H%d", sheetName, targetRowIndex)
-	closedDateValueRange := &sheets.ValueRange{ Values: [][]interface{}{{closedDate.Format("2006-01-02")}} } // Використовуємо формат РРРР-ММ-ДД
+	closedDateValueRange := &sheets.ValueRange{ Values: [][]interface{}{{closedDate.Format("2006-01-02")}} }
 	_, err = srv.Spreadsheets.Values.Update(spreadsheetID, closedDateUpdateRange, closedDateValueRange).
 		ValueInputOption("USER_ENTERED").Do()
 	if err != nil {
 		log.Printf("Помилка оновлення дати закриття цілі на аркуші '%s' для ChatID %d (рядок %d): %v", sheetName, chatID, targetRowIndex, err)
-		// Можна повернути помилку або лише залогувати, оскільки статус вже оновлено
 		return fmt.Errorf("не вдалося оновити дату закриття цілі: %w", err)
 	}
 
 	log.Printf("Статус цілі для ChatID %d (рядок %d) на аркуші '%s' успішно оновлено на '%s'", chatID, targetRowIndex, sheetName, newStatus)
 	return nil
 }
-
 
 // --- НОВІ Функції для роботи з аркушем "РобочийГрафік" ---
 
@@ -206,22 +216,18 @@ func LogWorkStart(srv *sheets.Service, spreadsheetID string, chatID int64, start
 	todayStr := startTime.Format("2006-01-02")
 	log.Printf("Логування початку роботи для ChatID %d на %s", chatID, todayStr)
 
-	// 1. Шукаємо рядок з сьогоднішньою датою
-	readRange := fmt.Sprintf("%s!A:A", workLogSheetName) // Читаємо колонку дат
+	readRange := fmt.Sprintf("%s!A:A", workLogSheetName) 
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
-		log.Printf("Помилка читання дат з '%s': %v", workLogSheetName, err)
-		// Не критично, спробуємо додати новий рядок
+		log.Printf("Помилка читання дат з '%s': %v. Спробуємо додати новий рядок.", workLogSheetName, err)
+		// Не повертаємо помилку, а спробуємо додати
 	}
-	rowIndex := findRowIndexByDate(resp.Values, todayStr)
+	rowIndex := findRowIndexByDate(resp.Values, todayStr) // findRowIndexByDate визначена вище
 
-	// Готуємо дані для оновлення/додавання
-	// A:Дата, B:Статус, C:Час Початку, D:Час Кінця, E:Тривалість роботи
-	startTimeStr := startTime.Format("15:04:05") // Формат HH:MM:SS
-	rowData := []interface{}{todayStr, "Розпочато", startTimeStr, "", ""} 
+	startTimeStr := startTime.Format("15:04:05") 
+	rowData := []interface{}{todayStr, "Розпочато", startTimeStr, "", ""} // A:Дата, B:Статус, C:Час Початку, D:Час Кінця, E:Тривалість
 
 	if rowIndex != -1 {
-		// Знайдено рядок для сьогодні, оновлюємо його
 		log.Printf("Знайдено рядок %d для дати %s. Оновлення...", rowIndex, todayStr)
 		updateRange := fmt.Sprintf("%s!A%d:E%d", workLogSheetName, rowIndex, rowIndex)
 		valueRange := &sheets.ValueRange{ Values: [][]interface{}{rowData} }
@@ -233,7 +239,6 @@ func LogWorkStart(srv *sheets.Service, spreadsheetID string, chatID int64, start
 		}
 		log.Printf("Рядок %d для дати %s успішно оновлено (роботу розпочато).", rowIndex, todayStr)
 	} else {
-		// Не знайдено рядка для сьогодні, додаємо новий
 		log.Printf("Не знайдено рядка для дати %s. Додавання нового...", todayStr)
 		appendRange := fmt.Sprintf("%s!A:E", workLogSheetName)
 		valueRange := &sheets.ValueRange{ Values: [][]interface{}{rowData} }
@@ -245,7 +250,6 @@ func LogWorkStart(srv *sheets.Service, spreadsheetID string, chatID int64, start
 		}
 		log.Printf("Новий рядок для дати %s успішно додано (роботу розпочато).", todayStr)
 	}
-
 	return nil
 }
 
@@ -256,90 +260,89 @@ func LogWorkStop(srv *sheets.Service, spreadsheetID string, chatID int64, endTim
 	log.Printf("Логування завершення роботи для ChatID %d на %s", chatID, todayStr)
 	zeroDuration := time.Duration(0)
 
-	// 1. Шукаємо рядок з сьогоднішньою датою
-	// Читаємо Дата(A), Статус(B), ЧасПочатку(C)
-	readRange := fmt.Sprintf("%s!A:C", workLogSheetName)
+	readRange := fmt.Sprintf("%s!A:C", workLogSheetName) // Читаємо Дата(A), Статус(B), ЧасПочатку(C)
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
 		log.Printf("Помилка читання даних з '%s' для завершення роботи: %v", workLogSheetName, err)
 		return zeroDuration, fmt.Errorf("не вдалося прочитати дані для завершення роботи: %w", err)
 	}
-	rowIndex := findRowIndexByDate(resp.Values, todayStr)
+	rowIndex := findRowIndexByDate(resp.Values, todayStr) // findRowIndexByDate визначена вище
 
 	if rowIndex == -1 {
 		log.Printf("Не знайдено рядка для дати %s на '%s', щоб зафіксувати кінець роботи.", todayStr, workLogSheetName)
 		return zeroDuration, fmt.Errorf("не знайдено запису про початок роботи за сьогодні")
 	}
 
-	// 2. Отримуємо час початку з таблиці та розраховуємо тривалість
 	var startTimeStr string
 	var startTime time.Time
 	var duration time.Duration = zeroDuration
-	var currentStatus string
+	var currentStatus string = "Невідомо" // Статус за замовчуванням
 	
-	// resp.Values має індексацію з 0, rowIndex - 1-based індекс рядка на аркуші
-	// Потрібен 0-based індекс для зрізу resp.Values
-	rowDataIndex := rowIndex -1
+	rowDataIndex := rowIndex -1 // 0-based індекс для доступу до resp.Values
 	if rowDataIndex >= 0 && rowDataIndex < len(resp.Values) && len(resp.Values[rowDataIndex]) >= 3 {
-		startTimeStr = fmt.Sprintf("%v", resp.Values[rowDataIndex][2]) // Колонка C
-		currentStatus = fmt.Sprintf("%v", resp.Values[rowDataIndex][1]) // Колонка B
+		startTimeStr = fmt.Sprintf("%v", resp.Values[rowDataIndex][2]) 
+		currentStatus = fmt.Sprintf("%v", resp.Values[rowDataIndex][1])
 		
-		// Намагаємося розпарсити час початку (припускаємо формат HH:MM:SS)
-		// Додаємо сьогоднішню дату, щоб отримати повний time.Time
 		startTimeParsed, errTime := time.Parse("2006-01-02 15:04:05", todayStr+" "+startTimeStr)
 		if errTime == nil {
 			startTime = startTimeParsed
-			if currentStatus == "Розпочато" || currentStatus == "Робочий" { // Розраховуємо тривалість, тільки якщо робота була розпочата
+			if currentStatus == "Розпочато" || currentStatus == "Робочий" { 
 				duration = endTime.Sub(startTime)
 			} else {
-				log.Printf("Робота для ChatID %d на %s вже була завершена або скасована раніше (статус: %s). Тривалість не розраховано.", chatID, todayStr, currentStatus)
+				log.Printf("Робота для ChatID %d на %s вже була завершена або інший статус (%s). Тривалість не розраховано.", chatID, todayStr, currentStatus)
 			}
 		} else {
 			log.Printf("Не вдалося розпарсити час початку '%s' для ChatID %d на %s: %v", startTimeStr, chatID, todayStr, errTime)
-			// Продовжуємо без розрахунку тривалості
 		}
 	} else {
 		log.Printf("Недостатньо даних у рядку %d для розрахунку тривалості.", rowIndex)
 	}
 
-	// 3. Оновлюємо Статус(B), Час Кінця(D), Тривалість(E)
-	durationStr := formatDuration(duration)
+	durationStr := formatDuration(duration) // formatDuration визначена вище
 	newStatus := "Завершено"
-	updateData := []interface{}{newStatus, startTimeStr, endTimeStr, durationStr} // Дані для B, C, D, E
-	
-	updateRange := fmt.Sprintf("%s!B%d:E%d", workLogSheetName, rowIndex, rowIndex)
-	valueRange := &sheets.ValueRange{ Values: [][]interface{}{updateData} }
+	// Оновлюємо D (Час Кінця) та E (Тривалість)
+	updateRange := fmt.Sprintf("%s!D%d:E%d", workLogSheetName, rowIndex, rowIndex)
+	valueRange := &sheets.ValueRange{ Values: [][]interface{}{{endTimeStr, durationStr}} }
 	
 	_, err = srv.Spreadsheets.Values.Update(spreadsheetID, updateRange, valueRange).
 		ValueInputOption("USER_ENTERED").Do()
 	if err != nil {
-		log.Printf("Помилка оновлення рядка %d на '%s' для завершення роботи: %v", rowIndex, workLogSheetName, err)
-		return zeroDuration, fmt.Errorf("не вдалося оновити запис про завершення роботи: %w", err)
+		log.Printf("Помилка оновлення D:E рядка %d на '%s' для завершення роботи: %v", rowIndex, workLogSheetName, err)
+		return zeroDuration, fmt.Errorf("не вдалося оновити запис про час завершення роботи: %w", err)
 	}
+
+	// Окремо оновлюємо статус (B)
+	statusUpdateRange := fmt.Sprintf("%s!B%d", workLogSheetName, rowIndex)
+	statusValueRange := &sheets.ValueRange{ Values: [][]interface{}{{newStatus}} }
+	_, err = srv.Spreadsheets.Values.Update(spreadsheetID, statusUpdateRange, statusValueRange).
+		ValueInputOption("USER_ENTERED").Do()
+	if err != nil {
+		log.Printf("Помилка оновлення статусу (B) рядка %d на '%s' для завершення роботи: %v", rowIndex, workLogSheetName, err)
+		// Продовжуємо, але повертаємо тривалість, оскільки час кінця міг записатися
+	}
+
 
 	log.Printf("Рядок %d для дати %s успішно оновлено (роботу завершено, тривалість: %s).", rowIndex, todayStr, durationStr)
 	return duration, nil
 }
 
+
 // LogDayOff знаходить/додає рядок для вказаної дати та встановлює статус "Вихідний"
 func LogDayOff(srv *sheets.Service, spreadsheetID string, chatID int64, dateStr string) error {
 	log.Printf("Логування вихідного дня для ChatID %d на %s", chatID, dateStr)
 
-	// 1. Шукаємо рядок з датою
 	readRange := fmt.Sprintf("%s!A:A", workLogSheetName)
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
-		log.Printf("Помилка читання дат з '%s': %v", workLogSheetName, err)
+		log.Printf("Помилка читання дат з '%s': %v. Спробуємо додати новий рядок.", workLogSheetName, err)
 	}
-	rowIndex := findRowIndexByDate(resp.Values, dateStr)
+	rowIndex := findRowIndexByDate(resp.Values, dateStr) // findRowIndexByDate визначена вище
 
-	// Готуємо дані для оновлення/додавання
-	rowData := []interface{}{dateStr, "Вихідний", "", "", ""} // Дата, Статус, очищуємо C, D, E
+	rowData := []interface{}{dateStr, "Вихідний", "", "", ""} // A:Дата, B:Статус, C:Час Початку, D:Час Кінця, E:Тривалість
 
 	if rowIndex != -1 {
-		// Знайдено рядок, оновлюємо його
 		log.Printf("Знайдено рядок %d для дати %s. Оновлення статусу на 'Вихідний'...", rowIndex, dateStr)
-		updateRange := fmt.Sprintf("%s!A%d:E%d", workLogSheetName, rowIndex, rowIndex)
+		updateRange := fmt.Sprintf("%s!A%d:E%d", workLogSheetName, rowIndex, rowIndex) // Оновлюємо весь рядок, щоб очистити час
 		valueRange := &sheets.ValueRange{ Values: [][]interface{}{rowData} }
 		_, err = srv.Spreadsheets.Values.Update(spreadsheetID, updateRange, valueRange).
 			ValueInputOption("USER_ENTERED").Do()
@@ -349,7 +352,6 @@ func LogDayOff(srv *sheets.Service, spreadsheetID string, chatID int64, dateStr 
 		}
 		log.Printf("Рядок %d для дати %s успішно оновлено (статус 'Вихідний').", rowIndex, dateStr)
 	} else {
-		// Не знайдено рядка, додаємо новий
 		log.Printf("Не знайдено рядка для дати %s. Додавання нового запису 'Вихідний'...", dateStr)
 		appendRange := fmt.Sprintf("%s!A:E", workLogSheetName)
 		valueRange := &sheets.ValueRange{ Values: [][]interface{}{rowData} }
@@ -361,12 +363,11 @@ func LogDayOff(srv *sheets.Service, spreadsheetID string, chatID int64, dateStr 
 		}
 		log.Printf("Новий рядок для дати %s успішно додано (статус 'Вихідний').", dateStr)
 	}
-
 	return nil
 }
 
+
 // getMotivation (залишається без змін)
-// ...
 func getMotivation() string {
 	hour := time.Now().Hour()
 	switch {
