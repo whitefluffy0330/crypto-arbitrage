@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	// Додаємо імпорт config для типу config.Config
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	gsheets "google.golang.org/api/sheets/v4"
 )
@@ -67,7 +69,10 @@ func GetUserState(chatID int64) string {
 	return state
 }
 
-func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, spreadsheetID string) error {
+// --- Функції для роботи з цілями ---
+
+// SetUserGoal тепер приймає cfg config.Config
+func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg config.Config) error {
 	goalDataForSheet := sheets.FinancialGoalData{
 		Amount:       goal.Amount,
 		Currency:     goal.Currency,
@@ -75,7 +80,8 @@ func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, spreads
 		OriginalText: goal.OriginalText,
 		SetDate:      goal.SetDate,
 	}
-	err := sheets.AddGoalToSheet(srv, spreadsheetID, chatID, goalDataForSheet)
+	// Передаємо SpreadsheetID та SheetNameUserGoals з cfg
+	err := sheets.AddGoalToSheet(srv, cfg.SpreadsheetID, chatID, goalDataForSheet)
 	if err != nil {
 		log.Printf("ПОМИЛКА при спробі записати ціль у Google Sheet для ChatID %d: %v", chatID, err)
 		return fmt.Errorf("не вдалося зберегти ціль у Google Таблиці: %w", err)
@@ -87,7 +93,8 @@ func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, spreads
 	return nil
 }
 
-func GetUserGoal(chatID int64, srv *gsheets.Service, spreadsheetID string) (FinancialGoal, bool) {
+// GetUserGoal тепер приймає cfg config.Config
+func GetUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) (FinancialGoal, bool) {
 	userGoalsMutex.RLock()
 	goal, exists := userGoals[chatID]
 	userGoalsMutex.RUnlock()
@@ -98,7 +105,8 @@ func GetUserGoal(chatID int64, srv *gsheets.Service, spreadsheetID string) (Fina
 	}
 
 	log.Printf("Ціль для ChatID %d не знайдено в пам'яті, спроба завантаження з Google Sheets...", chatID)
-	sheetGoalData, foundInSheet, err := sheets.GetActiveGoalFromSheet(srv, spreadsheetID, chatID)
+	// Передаємо SpreadsheetID та SheetNameUserGoals з cfg
+	sheetGoalData, foundInSheet, err := sheets.GetActiveGoalFromSheet(srv, cfg.SpreadsheetID, chatID)
 	if err != nil {
 		log.Printf("Помилка завантаження активної цілі з Google Sheets для ChatID %d: %v", chatID, err)
 		return FinancialGoal{}, false
@@ -121,25 +129,20 @@ func GetUserGoal(chatID int64, srv *gsheets.Service, spreadsheetID string) (Fina
 	return FinancialGoal{}, false
 }
 
-// DeleteUserGoal тепер викликається з підпакету goal (через HandleCallback)
-// Вона відповідає за оновлення статусу в Google Sheet ТА видалення з кешу.
-// Якщо виникає помилка в Sheets, вона її повертає.
-func DeleteUserGoal(chatID int64, srv *gsheets.Service, spreadsheetID string) error {
-	err := sheets.UpdateGoalStatusInSheet(srv, spreadsheetID, chatID, "Закрита", time.Now().UTC())
+// DeleteUserGoal тепер приймає cfg config.Config
+func DeleteUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) error {
+	// Передаємо SpreadsheetID та SheetNameUserGoals з cfg
+	err := sheets.UpdateGoalStatusInSheet(srv, cfg.SpreadsheetID, chatID, "Закрита", time.Now().UTC())
 	if err != nil {
-		// UpdateGoalStatusInSheet повертає nil, якщо ціль не знайдено активною,
-		// тому перевіряємо на конкретну помилку, перш ніж її повертати.
-		if err.Error() != "не знайдено активної цілі для оновлення" {
+		if err.Error() == "не знайдено активної цілі для оновлення" {
+			log.Printf("DeleteUserGoal: Не знайдено активної цілі для закриття в таблиці для ChatID %d.", chatID)
+		} else {
 			log.Printf("ПОМИЛКА в DeleteUserGoal при оновленні статусу в Google Sheet для ChatID %d: %v", chatID, err)
 			return fmt.Errorf("не вдалося оновити статус цілі у Google Таблиці: %w", err)
 		}
-		// Якщо активної цілі не було знайдено в таблиці, помилки немає, але з кешу все одно треба видалити
-		log.Printf("DeleteUserGoal: Активну ціль для ChatID %d не знайдено в таблиці (можливо, вже закрита).", chatID)
 	}
 	
-	// Незалежно від результату оновлення в таблиці (якщо це не помилка API),
-	// намагаємося видалити з кешу, якщо вона там є.
-	ClearInMemoryUserGoal(chatID) // Викликаємо нову функцію для очищення кешу
+	ClearInMemoryUserGoal(chatID)
 	
 	if err != nil && err.Error() != "не знайдено активної цілі для оновлення" {
 		return err
@@ -149,7 +152,6 @@ func DeleteUserGoal(chatID int64, srv *gsheets.Service, spreadsheetID string) er
 }
 
 // ClearInMemoryUserGoal видаляє ціль користувача з кешу пам'яті.
-// Ця функція експортована (починається з великої літери), щоб її міг викликати підпакет goal.
 func ClearInMemoryUserGoal(chatID int64) {
 	userGoalsMutex.Lock()
 	defer userGoalsMutex.Unlock()
@@ -161,8 +163,8 @@ func ClearInMemoryUserGoal(chatID int64) {
 	}
 }
 
-// InitBot, HandleUpdates, SetWebhook, RemoveWebhook залишаються без змін
-func InitBot(token string) (*tgbotapi.BotAPI, error) { // ... (код без змін)
+// --- Основні функції бота ---
+func InitBot(token string) (*tgbotapi.BotAPI, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		log.Printf("Помилка створення екземпляра бота: %v", err)
@@ -171,14 +173,17 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) { // ... (код без з�
 	return bot, nil
 }
 
-func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, spreadsheetID string) { // ... (код без змін)
+// HandleUpdates тепер приймає cfg config.Config і передає її в HandleUpdate
+func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, cfg config.Config) {
 	log.Println("Розпочато обробку оновлень...")
 	for update := range updates {
-		HandleUpdate(bot, update, srv, spreadsheetID)
+		// Передаємо всю cfg далі
+		HandleUpdate(bot, update, srv, cfg)
 	}
 	log.Println("Зупинено обробку оновлень (канал закрито).")
 }
 
+// SetWebhook і RemoveWebhook залишаються без змін
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error { // ... (код без змін)
 	fullWebhookURL := webhookBaseURL + webhookPath
 	log.Printf("Встановлення вебхука на: %s", fullWebhookURL)
@@ -212,7 +217,6 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	}
 	return nil
 }
-
 func RemoveWebhook(bot *tgbotapi.BotAPI) error { // ... (код без змін)
 	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
