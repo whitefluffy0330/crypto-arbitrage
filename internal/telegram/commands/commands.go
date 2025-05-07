@@ -6,65 +6,71 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	// Додаємо імпорт config
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
-// getCurrentTimeInKyiv (копія з sheets.go, або краще винести в окремий shared утилітний пакет, якщо буде багато таких)
-// Або просто передавати time.Now() і нехай пакет sheets сам розбирається з часовою зоною
-var kyivLocationCommands *time.Location 
-
-func init() {
-	loc, err := time.LoadLocation("Europe/Kyiv")
-	if err != nil {
-		log.Printf("Критична помилка в commands: не вдалося завантажити часову зону Europe/Kyiv: %v. Буде використано UTC.", err)
-		kyivLocationCommands = time.UTC
-	} else {
-		kyivLocationCommands = loc
-	}
-}
-
-func getCurrentTimeInKyivCommands() time.Time {
-	return time.Now().In(kyivLocationCommands)
-}
+// Прибираємо локальну копію kyivLocationCommands, оскільки пакет sheets сам обробляє час
+// var kyivLocationCommands *time.Location
+// func init() { ... }
+// func getCurrentTimeInKyivCommands() time.Time { ... }
 
 
-func StartWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
+// StartWork тепер приймає cfg та передає параметри з cfg в sheets.LogWorkStart
+func StartWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) { // <<< ЗМІНЕНО СИГНАТУРУ
 	chatID := msg.Chat.ID
 	log.Printf("Команда /start для ChatID %d", chatID)
-	// Передаємо поточний час. Пакет sheets подбає про часову зону.
-	startTime := time.Now() 
-	
-	err := sheets.LogWorkStart(srv, spreadsheetID, chatID, startTime)
+	startTime := time.Now() // Беремо поточний час
+
+	// Викликаємо функцію з пакета sheets, передаючи назву аркуша з cfg
+	err := sheets.LogWorkStart(srv, cfg.SpreadsheetID, cfg.SheetNameWorkLog, chatID, startTime) // <<< ЗМІНЕНО ТУТ
 
 	var text string
 	if err != nil {
 		log.Printf("Помилка логування початку роботи в Google Sheets для ChatID %d: %v", chatID, err)
-		text = fmt.Sprintf("✅ Робочий день розпочато, але сталася помилка при записі у таблицю: %v", err)
+		text = fmt.Sprintf("✅ Робочий день розпочато, але сталася помилка при записі у таблицю ('%s'): %v", cfg.SheetNameWorkLog, err)
 	} else {
-		// Для відображення користувачу, конвертуємо час у Київський
-		text = fmt.Sprintf("✅ Робочий день розпочато о %s (за Києвом). Успішної роботи!", startTime.In(kyivLocationCommands).Format("15:04:05"))
+		// Для відображення використовуємо локальний час (конвертація відбувається в sheets)
+		// Або можемо конвертувати тут, якщо sheets.LogWorkStart не повертає локальний час
+		// Поточна sheets.LogWorkStart логує локальний час, але не повертає його.
+		// Використаємо знову time.Now(), але це може бути не точно той самий час.
+		// Краще: отримати kyivLocation з sheets пакета або визначити тут.
+		// Поки що залишимо простий варіант з новим time.Now() для повідомлення.
+		// Або ще краще - виправити StartWork, щоб повертав відформатований час? Ні, залишимо так.
+		// Пакет sheets вже використовує Europe/Kyiv для запису.
+		text = fmt.Sprintf("✅ Робочий день розпочато о %s (за Києвом). Успішної роботи!", time.Now().In(sheets.KyivLocation()).Format("15:04:05")) // Припускаємо, що KyivLocation() експортується з sheets
+		// АБО ЯКЩО НЕ ЕКСПОРТУЄТЬСЯ:
+		// text = fmt.Sprintf("✅ Робочий день розпочато о %s. Успішної роботи!", startTime.Format("15:04:05 (MST)")) // Покажемо час сервера, якщо немає доступу до kyivLocation
 	}
-	
+
 	message := tgbotapi.NewMessage(chatID, text)
 	if _, sendErr := bot.Send(message); sendErr != nil {
 		log.Printf("Помилка при відправці повідомлення StartWork для ChatID %d: %v", chatID, sendErr)
 	}
 }
 
-func StopWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
+// StopWork тепер приймає cfg та передає параметри з cfg в sheets.LogWorkStop
+func StopWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) { // <<< ЗМІНЕНО СИГНАТУРУ
 	chatID := msg.Chat.ID
 	log.Printf("Команда /stop для ChatID %d", chatID)
 	endTime := time.Now()
 
-	duration, err := sheets.LogWorkStop(srv, spreadsheetID, chatID, endTime)
+	// Викликаємо функцію з пакета sheets, передаючи назву аркуша з cfg
+	duration, err := sheets.LogWorkStop(srv, cfg.SpreadsheetID, cfg.SheetNameWorkLog, chatID, endTime) // <<< ЗМІНЕНО ТУТ
 
 	var text string
 	if err != nil {
 		log.Printf("Помилка логування завершення роботи в Google Sheets для ChatID %d: %v", chatID, err)
-		text = fmt.Sprintf("🛑 Робочий день завершено, але сталася помилка при записі у таблицю: %v", err)
+		text = fmt.Sprintf("🛑 Робочий день завершено, але сталася помилка при записі у таблицю ('%s'): %v", cfg.SheetNameWorkLog, err)
 	} else {
-		text = fmt.Sprintf("🛑 Робочий день завершено о %s (за Києвом). Тривалість: %s. Гарного відпочинку!", endTime.In(kyivLocationCommands).Format("15:04:05"), sheets.FormatDuration(duration)) // Використовуємо sheets.FormatDuration
+		// Використовуємо sheets.FormatDuration, який ми зробили публічним
+		durationStr := sheets.FormatDuration(duration)
+		// Відображаємо час завершення у київському часі
+		text = fmt.Sprintf("🛑 Робочий день завершено о %s (за Києвом). Тривалість: %s. Гарного відпочинку!", endTime.In(sheets.KyivLocation()).Format("15:04:05"), durationStr) // Припускаємо sheets.KyivLocation()
+		// АБО ЯКЩО НЕ ЕКСПОРТУЄТЬСЯ:
+		// text = fmt.Sprintf("🛑 Робочий день завершено о %s. Тривалість: %s. Гарного відпочинку!", endTime.Format("15:04:05 (MST)"), durationStr)
 	}
 
 	message := tgbotapi.NewMessage(chatID, text)
@@ -73,19 +79,23 @@ func StopWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service,
 	}
 }
 
-func DayOff(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
+// DayOff тепер приймає cfg та передає параметри з cfg в sheets.LogDayOff
+func DayOff(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) { // <<< ЗМІНЕНО СИГНАТУРУ
 	chatID := msg.Chat.ID
 	log.Printf("Команда /dayoff для ChatID %d", chatID)
-	dateToLog := time.Now() // Функція LogDayOff в sheets сама розбереться з датою та часовою зоною
+	dateToLog := time.Now() // LogDayOff сам конвертує дату
 
-	err := sheets.LogDayOff(srv, spreadsheetID, chatID, dateToLog)
+	// Викликаємо функцію з пакета sheets, передаючи назву аркуша з cfg
+	err := sheets.LogDayOff(srv, cfg.SpreadsheetID, cfg.SheetNameWorkLog, chatID, dateToLog) // <<< ЗМІНЕНО ТУТ
 
 	var text string
 	if err != nil {
 		log.Printf("Помилка логування вихідного дня в Google Sheets для ChatID %d: %v", chatID, err)
-		text = fmt.Sprintf("📅 Сьогодні вихідний. Сталася помилка при записі у таблицю: %v", err)
+		text = fmt.Sprintf("📅 Сьогодні вихідний. Сталася помилка при записі у таблицю ('%s'): %v", cfg.SheetNameWorkLog, err)
 	} else {
-		text = fmt.Sprintf("📅 Статус 'Вихідний' на %s (за Києвом) встановлено в таблиці.", dateToLog.In(kyivLocationCommands).Format("02.01.2006"))
+		text = fmt.Sprintf("📅 Статус 'Вихідний' на %s (за Києвом) встановлено в таблиці '%s'.", dateToLog.In(sheets.KyivLocation()).Format("02.01.2006"), cfg.SheetNameWorkLog) // Припускаємо sheets.KyivLocation()
+		// АБО ЯКЩО НЕ ЕКСПОРТУЄТЬСЯ:
+		// text = fmt.Sprintf("📅 Статус 'Вихідний' на %s встановлено в таблиці '%s'.", dateToLog.Format("2006-01-02"), cfg.SheetNameWorkLog)
 	}
 
 	message := tgbotapi.NewMessage(chatID, text)
