@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv" // Для конвертації рядків у числа
 	"time"
+	// "strings" // Може знадобитися для додаткової обробки рядків
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
@@ -12,7 +14,16 @@ import (
 
 const SpreadsheetsScope = "https://www.googleapis.com/auth/spreadsheets.readonly"
 
-// NewService (ймовірно, не використовується, як ми обговорювали)
+// SheetRowData структура для зберігання даних, прочитаних з одного рядка таблиці
+type SheetRowData struct {
+	Date            string  // Дата з таблиці
+	Income          float64 // Фактичний дохід
+	SheetGoal       float64 // План/Мета з таблиці
+	SheetDaysLeft   int     // Залишилося днів у періоді з таблиці
+	SheetReqDaily   float64 // Необхідно щодня з таблиці
+}
+
+// NewService (ймовірно, не використовується)
 func NewService(credentialsJSON []byte) (*sheets.Service, error) {
 	ctx := context.Background()
 	srv, err := sheets.NewService(ctx, option.WithCredentialsJSON(credentialsJSON))
@@ -22,44 +33,67 @@ func NewService(credentialsJSON []byte) (*sheets.Service, error) {
 	return srv, nil
 }
 
-func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) string {
-	// ЗМІНЕНО НАЗВУ АРКУША з "ЩоденнийЗвіт" на "Звіт"
-	readRange := "Звіт!A2:E2" // <--- ОСНОВНА ЗМІНА ТУТ!
-
-	// Якщо ваш звіт насправді на іншому аркуші (наприклад, "Мій_Прогресу"),
-	// вкажіть тут його назву. Також переконайтеся, що діапазон A2:E2
-	// на цьому аркуші містить 5 значень, які очікує код (дата, дохід, мета, днів залишилося, потрібно щодня).
+// GenerateProgressReport тепер повертає структуровані дані SheetRowData та помилку
+func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) (SheetRowData, error) {
+	readRange := "Звіт!A2:E2" // Або інший аркуш/діапазон, якщо потрібно
+	var data SheetRowData
 
 	log.Printf("Спроба читання даних з Google Sheets: SpreadsheetID=%s, Range=%s", spreadsheetID, readRange)
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
 		log.Printf("Не вдалося отримати дані з Google Sheets: %v", err)
-		return "Помилка отримання даних зі звіту." // Змінено текст помилки
+		return data, fmt.Errorf("помилка отримання даних з Google Sheets: %w", err)
 	}
 
 	if len(resp.Values) < 1 || len(resp.Values[0]) < 5 {
-		log.Printf("Недостатньо даних для звіту в діапазоні %s: отримано %d рядків, очікувався хоча б 1 рядок з 5 колонками", readRange, len(resp.Values))
-		return "Недостатньо даних у таблиці для формування звіту." // Змінено текст помилки
+		errMsg := fmt.Sprintf("недостатньо даних у діапазоні %s: отримано %d рядків (або недостатньо колонок), очікувався 1 рядок з 5 колонками", readRange, len(resp.Values))
+		log.Println(errMsg)
+		return data, fmt.Errorf(errMsg)
 	}
 
-	row := resp.Values[0]
-	var date, income, goal, daysLeft, requiredDaily interface{}
+	row := resp.Values[0] // Беремо перший рядок даних (має бути рядок A2:E2)
 
-	if len(row) > 0 { date = row[0] }
-	if len(row) > 1 { income = row[1] }
-	if len(row) > 2 { goal = row[2] }
-	if len(row) > 3 { daysLeft = row[3] }
-	if len(row) > 4 { requiredDaily = row[4] }
+	// Парсинг даних з рядка
+	if len(row) > 0 { data.Date = fmt.Sprintf("%v", row[0]) }
+	
+	if len(row) > 1 { 
+		incomeStr := fmt.Sprintf("%v", row[1])
+		data.Income, err = strconv.ParseFloat(incomeStr, 64)
+		if err != nil {
+			log.Printf("Помилка парсингу доходу '%s': %v", incomeStr, err)
+			return data, fmt.Errorf("некоректний формат доходу в таблиці: %s", incomeStr)
+		}
+	}
+	if len(row) > 2 {
+		sheetGoalStr := fmt.Sprintf("%v", row[2])
+		data.SheetGoal, err = strconv.ParseFloat(sheetGoalStr, 64)
+		if err != nil {
+			log.Printf("Помилка парсингу мети з таблиці '%s': %v", sheetGoalStr, err)
+			return data, fmt.Errorf("некоректний формат мети в таблиці: %s", sheetGoalStr)
+		}
+	}
+	if len(row) > 3 {
+		sheetDaysLeftStr := fmt.Sprintf("%v", row[3])
+		data.SheetDaysLeft, err = strconv.Atoi(sheetDaysLeftStr)
+		if err != nil {
+			log.Printf("Помилка парсингу 'днів залишилося' з таблиці '%s': %v", sheetDaysLeftStr, err)
+			return data, fmt.Errorf("некоректний формат 'днів залишилося' в таблиці: %s", sheetDaysLeftStr)
+		}
+	}
+	if len(row) > 4 {
+		sheetReqDailyStr := fmt.Sprintf("%v", row[4])
+		data.SheetReqDaily, err = strconv.ParseFloat(sheetReqDailyStr, 64)
+		if err != nil {
+			log.Printf("Помилка парсингу 'потрібно щодня' з таблиці '%s': %v", sheetReqDailyStr, err)
+			return data, fmt.Errorf("некоректний формат 'потрібно щодня' в таблиці: %s", sheetReqDailyStr)
+		}
+	}
 
-	log.Printf("Дані з таблиці отримано: Дата=%v, Дохід=%v, Мета=%v, ДнівЗалишилось=%v, ПотрібноЩодня=%v",
-		date, income, goal, daysLeft, requiredDaily)
-
-	return fmt.Sprintf(
-		"📅 Дата з таблиці: %v\n💰 Ваш дохід з таблиці: %v\n🎯 Ваша мета з таблиці: %v\n🕒 Днів до кінця (з таблиці): %v\n📈 Потрібно заробляти щодня (з таблиці): %v\n\n🔥 %s",
-		date, income, goal, daysLeft, requiredDaily, getMotivation(), // getMotivation() визначена нижче
-	)
+	log.Printf("Дані з таблиці успішно розпарсені: %+v", data)
+	return data, nil // Повертаємо структуровані дані та відсутність помилки
 }
 
+// getMotivation (залишається без змін, але зараз не використовується цією функцією)
 func getMotivation() string {
 	hour := time.Now().Hour()
 	switch {
