@@ -3,44 +3,32 @@ package telegram
 import (
 	"fmt"
 	"log"
-	"regexp" // Для розбору тексту за допомогою регулярних виразів
-	"strconv" // Для конвертації рядків у числа
-	"strings" // Для роботи з рядками (наприклад, TrimSpace)
-	"time"    // Для встановлення дати цілі
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	// Додаємо імпорт gsheets для типу srv у сигнатурі HandleGoalInput
+	gsheets "google.golang.org/api/sheets/v4"
 )
 
-// ВАЖЛИВО: Оголошення 'var userGoals' було видалено звідси раніше.
-// Воно тепер коректно визначене лише в файлі internal/telegram/telegram.go
-// разом зі змінною userGoalsMutex, типом FinancialGoal та функціями SetUserGoal/GetUserGoal.
-
 // HandleGoalInput обробляє введення користувачем тексту цілі,
-// парсить його та зберігає структуровані дані.
-func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+// парсить його та зберігає структуровані дані (в пам'яті та Google Sheets).
+// Тепер приймає srv та spreadsheetID для передачі в SetUserGoal.
+func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
 	chatID := message.Chat.ID
 	inputText := message.Text
 
 	log.Printf("Отримано текст для цілі від чату %d: %s", chatID, inputText)
 
-	// Регулярний вираз для парсингу формату "СУМА [ВАЛЮТА], КІЛЬКІСТЬ_ДНІВ [днів/дня/день]"
-	// Приклади: "15000 грн, 30 днів", "500 USD, 60", "1000, 15 днів"
-	// 1. Сума (число, може бути з копійками)
-	// 2. Валюта (опціонально, 3 літери, наприклад, грн, usd, eur) - якщо немає, можна встановити за замовчуванням
-	// 3. Кількість днів (число)
-	// (?i) робить частину виразу нечутливою до регістру для "днів"
 	re := regexp.MustCompile(`^(\d+(?:\.\d{1,2})?)\s*([а-яА-Яa-zA-Z]{3})?\s*,\s*(\d+)\s*(?i:(?:днів|дня|день))?$`)
 	matches := re.FindStringSubmatch(strings.TrimSpace(inputText))
 
 	var goal FinancialGoal // Використовуємо структуру FinancialGoal з telegram.go
 	var parsedSuccessfully bool
 
-	if len(matches) >= 4 { // Очікуємо сам рядок + групи захоплення (сума, валюта(опц), дні)
-		// Група matches[0] - це весь знайдений рядок
-		// Група matches[1] - це сума
-		// Група matches[2] - це валюта (може бути порожньою)
-		// Група matches[3] - це дні
-
+	if len(matches) >= 4 {
 		amountStr := matches[1]
 		currencyStr := strings.ToUpper(strings.TrimSpace(matches[2]))
 		daysStr := matches[3]
@@ -50,15 +38,14 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 		if errAmount == nil && errDays == nil && days > 0 {
 			if currencyStr == "" {
-				currencyStr = "UAH" // Валюта за замовчуванням, якщо не вказано
+				currencyStr = "UAH"
 			}
-
 			goal = FinancialGoal{
 				Amount:       amount,
 				Currency:     currencyStr,
 				Days:         days,
 				OriginalText: inputText,
-				SetDate:      time.Now().UTC(), // Зберігаємо час в UTC для універсальності
+				SetDate:      time.Now().UTC(),
 			}
 			parsedSuccessfully = true
 		}
@@ -66,15 +53,23 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 	var responseText string
 	if parsedSuccessfully {
-		SetUserGoal(chatID, goal) // Використовуємо функцію з telegram.go для збереження структурованої цілі
-		responseText = fmt.Sprintf(
-			"🎯 Чудово! Вашу фінансову ціль встановлено:\n\n"+
-				"Сума: %.2f %s\n"+
-				"Термін: %d днів\n"+
-				"Дата встановлення: %s",
-			goal.Amount, goal.Currency, goal.Days, goal.SetDate.Format("02.01.2006"), // Форматуємо дату
-		)
-		log.Printf("Ціль для чату %d успішно розпарсена та збережена: %+v", chatID, goal)
+		// Викликаємо оновлену SetUserGoal, передаючи srv та spreadsheetID, та обробляємо помилку
+		err := SetUserGoal(chatID, goal, srv, spreadsheetID)
+		if err != nil {
+			// Якщо виникла помилка при збереженні в Google Sheet
+			responseText = fmt.Sprintf("⚠️ Відбулася помилка під час збереження вашої цілі у Google Таблицю: %v\n\nВашу ціль поки що не збережено. Спробуйте пізніше або перевірте налаштування таблиці.", err)
+			log.Printf("Помилка SetUserGoal для ChatID %d при збереженні в Google Sheet: %v", chatID, err)
+		} else {
+			// Якщо все успішно збережено (включно з Google Sheet)
+			responseText = fmt.Sprintf(
+				"🎯 Чудово! Вашу фінансову ціль встановлено та збережено:\n\n"+
+					"Сума: `%.2f %s`\n"+
+					"Термін: `%d днів`\n"+
+					"Дата встановлення: `%s`",
+				goal.Amount, goal.Currency, goal.Days, goal.SetDate.Format("02.01.2006"),
+			)
+			log.Printf("Ціль для чату %d успішно розпарсена, збережена в пам'яті та Google Sheets: %+v", chatID, goal)
+		}
 	} else {
 		responseText = "⚠️ Не вдалося розпізнати формат цілі. Будь ласка, спробуйте ще раз у форматі:\n"+
 		               "`СУМА [ВАЛЮТА], КІЛЬКІСТЬ_ДНІВ днів`\n\n"+
@@ -84,10 +79,9 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	}
 
 	msg := tgbotapi.NewMessage(chatID, responseText)
-	// Встановлюємо ParseMode, якщо повідомлення містить Markdown (для повідомлення про помилку)
-	if !parsedSuccessfully {
-		msg.ParseMode = tgbotapi.ModeMarkdown
-	}
+	// Встановлюємо ParseMode Markdown для всіх відповідей звідси,
+	// оскільки і повідомлення про успіх, і про помилку можуть його використовувати.
+	msg.ParseMode = tgbotapi.ModeMarkdown
 
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Помилка надсилання відповіді HandleGoalInput для чату %d: %v", chatID, err)
