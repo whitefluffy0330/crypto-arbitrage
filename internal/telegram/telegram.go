@@ -1,13 +1,13 @@
 package telegram
 
 import (
-	"fmt"
+	"fmt" 
 	"log"
 	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	// Додаємо імпорт config для типу config.Config
+	// Імпортуємо config для типу config.Config
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	gsheets "google.golang.org/api/sheets/v4"
@@ -71,7 +71,7 @@ func GetUserState(chatID int64) string {
 
 // --- Функції для роботи з цілями ---
 
-// SetUserGoal тепер приймає cfg config.Config
+// SetUserGoal тепер передає cfg.SpreadsheetID та cfg.SheetNameUserGoals у sheets.AddGoalToSheet
 func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg config.Config) error {
 	goalDataForSheet := sheets.FinancialGoalData{
 		Amount:       goal.Amount,
@@ -80,8 +80,8 @@ func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg con
 		OriginalText: goal.OriginalText,
 		SetDate:      goal.SetDate,
 	}
-	// Передаємо SpreadsheetID та SheetNameUserGoals з cfg
-	err := sheets.AddGoalToSheet(srv, cfg.SpreadsheetID, chatID, goalDataForSheet)
+	// Передаємо конфігуровану назву аркуша для цілей
+	err := sheets.AddGoalToSheet(srv, cfg.SpreadsheetID, cfg.SheetNameUserGoals, chatID, goalDataForSheet) // <<< ЗМІНЕНО ТУТ
 	if err != nil {
 		log.Printf("ПОМИЛКА при спробі записати ціль у Google Sheet для ChatID %d: %v", chatID, err)
 		return fmt.Errorf("не вдалося зберегти ціль у Google Таблиці: %w", err)
@@ -93,7 +93,7 @@ func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg con
 	return nil
 }
 
-// GetUserGoal тепер приймає cfg config.Config
+// GetUserGoal тепер передає cfg.SpreadsheetID та cfg.SheetNameUserGoals у sheets.GetActiveGoalFromSheet
 func GetUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) (FinancialGoal, bool) {
 	userGoalsMutex.RLock()
 	goal, exists := userGoals[chatID]
@@ -105,8 +105,8 @@ func GetUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) (Financi
 	}
 
 	log.Printf("Ціль для ChatID %d не знайдено в пам'яті, спроба завантаження з Google Sheets...", chatID)
-	// Передаємо SpreadsheetID та SheetNameUserGoals з cfg
-	sheetGoalData, foundInSheet, err := sheets.GetActiveGoalFromSheet(srv, cfg.SpreadsheetID, chatID)
+	// Передаємо конфігуровану назву аркуша для цілей
+	sheetGoalData, foundInSheet, err := sheets.GetActiveGoalFromSheet(srv, cfg.SpreadsheetID, cfg.SheetNameUserGoals, chatID) // <<< ЗМІНЕНО ТУТ
 	if err != nil {
 		log.Printf("Помилка завантаження активної цілі з Google Sheets для ChatID %d: %v", chatID, err)
 		return FinancialGoal{}, false
@@ -129,10 +129,10 @@ func GetUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) (Financi
 	return FinancialGoal{}, false
 }
 
-// DeleteUserGoal тепер приймає cfg config.Config
+// DeleteUserGoal тепер передає cfg.SpreadsheetID та cfg.SheetNameUserGoals у sheets.UpdateGoalStatusInSheet
 func DeleteUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) error {
-	// Передаємо SpreadsheetID та SheetNameUserGoals з cfg
-	err := sheets.UpdateGoalStatusInSheet(srv, cfg.SpreadsheetID, chatID, "Закрита", time.Now().UTC())
+	// Передаємо конфігуровану назву аркуша для цілей
+	err := sheets.UpdateGoalStatusInSheet(srv, cfg.SpreadsheetID, cfg.SheetNameUserGoals, chatID, "Закрита", time.Now().UTC()) // <<< ЗМІНЕНО ТУТ
 	if err != nil {
 		if err.Error() == "не знайдено активної цілі для оновлення" {
 			log.Printf("DeleteUserGoal: Не знайдено активної цілі для закриття в таблиці для ChatID %d.", chatID)
@@ -145,7 +145,7 @@ func DeleteUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) error
 	ClearInMemoryUserGoal(chatID)
 	
 	if err != nil && err.Error() != "не знайдено активної цілі для оновлення" {
-		return err
+		return err 
 	}
 	log.Printf("Ціль для ChatID %d успішно оброблена для закриття (статус в Google Sheets оновлено, з кешу видалено).", chatID)
 	return nil
@@ -164,14 +164,6 @@ func ClearInMemoryUserGoal(chatID int64) {
 }
 
 // --- Основні функції бота ---
-func InitBot(token string) (*tgbotapi.BotAPI, error) {
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		log.Printf("Помилка створення екземпляра бота: %v", err)
-		return nil, err
-	}
-	return bot, nil
-}
 
 // HandleUpdates тепер приймає cfg config.Config і передає її в HandleUpdate
 func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, cfg config.Config) {
@@ -183,46 +175,19 @@ func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *g
 	log.Println("Зупинено обробку оновлень (канал закрито).")
 }
 
-// SetWebhook і RemoveWebhook залишаються без змін
-func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error { // ... (код без змін)
-	fullWebhookURL := webhookBaseURL + webhookPath
-	log.Printf("Встановлення вебхука на: %s", fullWebhookURL)
-	var whCfg tgbotapi.WebhookConfig
-	var errWh error
-	if certFilePath != "" {
-		whCfg, errWh = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
-	} else {
-		whCfg, errWh = tgbotapi.NewWebhook(fullWebhookURL)
-	}
-	if errWh != nil {
-		log.Printf("Помилка створення конфігурації вебхука: %v", errWh)
-		return errWh
-	}
-	_, errReq := bot.Request(whCfg)
-	if errReq != nil {
-		log.Printf("Помилка встановлення вебхука (bot.Request): %v", errReq)
-		return errReq
-	}
-	info, errInfo := bot.GetWebhookInfo()
-	if errInfo != nil {
-		log.Printf("Помилка отримання інформації про вебхук: %v", errInfo)
-	} else {
-		if info.LastErrorDate != 0 {
-			log.Printf("Помилка останнього зворотного виклику Telegram (вебхук): %s. URL: %s", info.LastErrorMessage, info.URL)
-		} else if info.URL == "" {
-			log.Printf("Вебхук оброблено, але URL порожній. Перевірте налаштування.")
-		} else {
-			log.Printf("Вебхук успішно встановлено. URL: %s", info.URL)
-		}
-	}
-	return nil
+// InitBot, SetWebhook, RemoveWebhook залишаються без змін
+func InitBot(token string) (*tgbotapi.BotAPI, error) { /*...*/ 
+	bot, err := tgbotapi.NewBotAPI(token)
+	if err != nil { log.Printf("Помилка створення екземпляра бота: %v", err); return nil, err }
+	return bot, nil
 }
-func RemoveWebhook(bot *tgbotapi.BotAPI) error { // ... (код без змін)
-	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
-	if err != nil {
-		log.Printf("Помилка видалення вебхука: %v", err)
-		return err
-	}
-	log.Println("Вебхук успішно видалено.")
-	return nil
+func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error { /*...*/
+	fullWebhookURL := webhookBaseURL + webhookPath; log.Printf("Встановлення вебхука на: %s", fullWebhookURL); var whCfg tgbotapi.WebhookConfig; var errWh error
+	if certFilePath != "" { whCfg, errWh = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath)) } else { whCfg, errWh = tgbotapi.NewWebhook(fullWebhookURL) }
+	if errWh != nil { log.Printf("Помилка створення конфігурації вебхука: %v", errWh); return errWh }
+	_, errReq := bot.Request(whCfg); if errReq != nil { log.Printf("Помилка встановлення вебхука (bot.Request): %v", errReq); return errReq }
+	info, errInfo := bot.GetWebhookInfo(); if errInfo != nil { log.Printf("Помилка отримання інформації про вебхук: %v", errInfo) } else { if info.LastErrorDate != 0 { log.Printf("Помилка останнього зворотного виклику Telegram (вебхук): %s. URL: %s", info.LastErrorMessage, info.URL) } else if info.URL == "" { log.Printf("Вебхук оброблено, але URL порожній. Перевірте налаштування.") } else { log.Printf("Вебхук успішно встановлено. URL: %s", info.URL) } }; return nil
+}
+func RemoveWebhook(bot *tgbotapi.BotAPI) error { /*...*/ 
+	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{}); if err != nil { log.Printf("Помилка видалення вебхука: %v", err); return err }; log.Println("Вебхук успішно видалено."); return nil
 }
