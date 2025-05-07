@@ -20,39 +20,18 @@ func HandleMyGoalCommand(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 // HandleCallback обробляє callback-запити, пов'язані з цілями.
-// Тепер приймає cfg config.Config, хоча наразі її не використовує,
-// оскільки специфічні callback-и обробляються в handler.go.
-// Може бути розширена в майбутньому.
-func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, srv *gsheets.Service, cfg config.Config) { // <<< ЗМІНЕНО СИГНАТУРУ
+// Тепер приймає cfg config.Config.
+// Специфічні callback-и для закриття цілі обробляються в handler.go.
+func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, srv *gsheets.Service, cfg config.Config) { // <<< Оновлена сигнатура
 	chatID := callback.Message.Chat.ID
 	callbackData := callback.Data
 	userName := callback.From.UserName
 
 	log.Printf("Підпакет goal: HandleCallback отримав дані: '%s' від [%s] (ChatID: %d)", callbackData, userName, chatID)
 
-	// Наразі специфічна логіка для підтвердження/скасування закриття цілі
-	// знаходиться в handler.go (пакет telegram), оскільки вона вимагає
-	// доступу до функції DeleteUserGoal та кешу userGoals з того пакета.
+	// Видалено блок switch, оскільки він посилався на невизначені константи,
+	// а основна логіка підтвердження/скасування закриття цілі тепер в handler.go.
+	// Ця функція залишається як заглушка для можливих майбутніх callback-ів цілей.
 
-	// Ця функція може бути розширена для обробки інших inline-кнопок,
-	// що стосуються цілей (наприклад, редагування цілі, перегляд історії тощо),
-	// якщо ви додасте такий функціонал.
-
-	// Наприклад, можна додати логіку для невідомих callback-ів, що сюди потрапили:
-	switch callbackData {
-	case CallbackConfirmCloseGoal, CallbackCancelCloseGoal:
-		// Ці обробляються в handler.go, тут нічого не робимо
-		log.Printf("Підпакет goal: Callback '%s' оброблено в handler.go", callbackData)
-	default:
-		log.Printf("Підпакет goal: Отримано невідомий callback data '%s'. Поки що ігнорується.", callbackData)
-		// Можна надіслати повідомлення користувачеві або просто проігнорувати.
-		// Відповідь на CallbackQuery (щоб прибрати "годинник") все одно буде надіслано з handler.go.
-	}
+	// Відповідь на CallbackQuery тепер надсилається з handler.go.
 }
-
-// Константи для callback даних (можливо, їх варто винести в спільне місце?)
-// Ці константи вже визначені в handler.go, тут вони для ясності логіки switch
-// const (
-// 	CallbackConfirmCloseGoal = "confirm_close_goal"
-// 	CallbackCancelCloseGoal  = "cancel_close_goal"
-// )
