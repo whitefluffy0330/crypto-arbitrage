@@ -1,65 +1,77 @@
 package telegram
 
 import (
-	"log" // Для логування дій та помилок
+	"log"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	// Використовуємо аліас gsheets для google.golang.org/api/sheets/v4, щоб було зрозуміло,
-	// що srv - це сервіс Google API.
 	gsheets "google.golang.org/api/sheets/v4"
 
-	// Імпорти ваших внутрішніх пакетів
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal" // Це підпакет goal
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-	// Пакет config тут не потрібен, оскільки spreadsheetID передається напряму.
-	// Пакет internal/sheets тут також не потрібен напряму, оскільки srv має тип gsheets.Service.
 )
 
-// HandleUpdate обробляє вхідні повідомлення та callback-запити.
-// spreadsheetID передається напряму, а не через config.Config.
+// HandleUpdate обробляє вхідні оновлення (повідомлення та callback-запити)
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, spreadsheetID string) {
-	if update.Message != nil { // Якщо це повідомлення
-		log.Printf("[%s] (%d): %s", update.Message.From.UserName, update.Message.Chat.ID, update.Message.Text)
-
-		// Обробка команд та текстів з кнопок
-		switch update.Message.Text {
-		case "/start", "🔁 Старт":
-			commands.StartWork(bot, update.Message)
-		case "/stop", "⛔️ Стоп":
-			commands.StopWork(bot, update.Message)
-		case "/dayoff", "🏖 Вихідний":
-			commands.DayOff(bot, update.Message, srv, spreadsheetID)
-		case "/goal", "🎯 Моя ціль":
-			// Викликаємо HandleMyGoalCommand з підпакета "goal"
-			goal.HandleMyGoalCommand(bot, update.Message.Chat.ID)
-		case "/motivation":
-			// Викликаємо GetRandomMotivation з пакета "motivation"
-			motivationText := motivation.GetRandomMotivation()
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, motivationText)
-			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Помилка надсилання мотиваційного повідомлення для чату %d: %v", update.Message.Chat.ID, err)
-			}
-		case "/report", "📊 Прогрес":
-			// Викликаємо ReportProgress з поточного пакета "telegram" (файл report.go)
-			ReportProgress(bot, update.Message, srv, spreadsheetID)
-		default:
-			// Якщо команда або текст кнопки не розпізнано, показуємо головну клавіатуру
-			log.Printf("Не розпізнана команда або текст від [%s]: %s", update.Message.From.UserName, update.Message.Text)
-			keyboard.ShowMainKeyboard(bot, update.Message.Chat.ID)
-		}
-	} else if update.CallbackQuery != nil { // Якщо це callback-запит від inline-кнопки
-		log.Printf("Отримано CallbackQuery від [%s], Data: %s", update.CallbackQuery.From.UserName, update.CallbackQuery.Data)
-		// Викликаємо HandleCallback з підпакета "goal"
+	// Спочатку обробляємо CallbackQuery, якщо він є
+	if update.CallbackQuery != nil {
+		chatID := update.CallbackQuery.Message.Chat.ID // Отримуємо chatID з повідомлення, до якого прив'язаний callback
+		log.Printf("Отримано CallbackQuery від [%s] (ChatID: %d), Data: %s", update.CallbackQuery.From.UserName, chatID, update.CallbackQuery.Data)
+		
+		// Передаємо обробку в підпакет goal
 		goal.HandleCallback(bot, update.CallbackQuery)
-
-		// Не забувайте відповідати на CallbackQuery, щоб прибрати "годинник" на кнопці
-		// callbackResp := tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data)
-		// if _, err := bot.AnswerCallbackQuery(callbackResp); err != nil {
-		// 	log.Printf("Помилка відповіді на CallbackQuery: %v", err)
-		// }
+		return // Завершуємо обробку цього оновлення
 	}
-	// Тут можна додати обробку інших типів оновлень, якщо потрібно
-	// (наприклад, update.EditedMessage, update.ChannelPost тощо)
+
+	// Якщо це не CallbackQuery, перевіряємо, чи це повідомлення
+	if update.Message == nil { // Ігноруємо інші типи оновлень (наприклад, EditedMessage)
+		return
+	}
+
+	// Отримуємо chatID та текст повідомлення
+	chatID := update.Message.Chat.ID
+	msgText := update.Message.Text
+	userName := update.Message.From.UserName
+
+	log.Printf("[%s] (%d): %s", userName, chatID, msgText)
+
+	// --- Керування станами ---
+	currentState := GetUserState(chatID) // Отримуємо поточний стан користувача
+
+	if currentState == StateAwaitingGoalInput {
+		// Якщо ми очікували введення цілі, передаємо повідомлення функції HandleGoalInput
+		log.Printf("Обробка повідомлення від [%s] як введення цілі (стан: %s)", userName, currentState)
+		HandleGoalInput(bot, update.Message) // Викликаємо HandleGoalInput з goal.go (верхнього рівня)
+		SetUserState(chatID, StateDefault) // Повертаємо користувача у звичайний стан
+		return // Завершуємо обробку
+	}
+	// --- Кінець керування станами ---
+
+	// Якщо стан звичайний (StateDefault), обробляємо як команду або текст кнопки
+	switch msgText {
+	case "/start", "🔁 Старт":
+		commands.StartWork(bot, update.Message)
+	case "/stop", "⛔️ Стоп":
+		commands.StopWork(bot, update.Message)
+	case "/dayoff", "🏖 Вихідний":
+		commands.DayOff(bot, update.Message, srv, spreadsheetID)
+	case "/goal", "🎯 Моя ціль":
+		// Викликаємо HandleMyGoalCommand з підпакета "goal", щоб надіслати запит
+		goal.HandleMyGoalCommand(bot, chatID)
+		// Встановлюємо стан очікування відповіді
+		SetUserState(chatID, StateAwaitingGoalInput)
+	case "/motivation":
+		motivationText := motivation.GetRandomMotivation()
+		msg := tgbotapi.NewMessage(chatID, motivationText)
+		if _, err := bot.Send(msg); err != nil {
+			log.Printf("Помилка надсилання мотиваційного повідомлення для чату %d: %v", chatID, err)
+		}
+	case "/report", "📊 Прогрес":
+		ReportProgress(bot, update.Message, srv, spreadsheetID)
+	default:
+		// Якщо не розпізнано ані команду, ані текст кнопки, показуємо головну клавіатуру
+		log.Printf("Не розпізнана команда або текст від [%s]: %s", userName, msgText)
+		keyboard.ShowMainKeyboard(bot, chatID)
+	}
 }
