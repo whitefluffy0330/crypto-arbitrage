@@ -10,15 +10,9 @@ import (
 	"google.golang.org/api/sheets/v4"
 )
 
-// Додано константу SpreadsheetsScope
 const SpreadsheetsScope = "https://www.googleapis.com/auth/spreadsheets.readonly"
-// Якщо вам потрібен також доступ на запис до таблиць, використовуйте:
-// const SpreadsheetsScope = "https://www.googleapis.com/auth/spreadsheets"
 
-// NewService створює новий клієнт Google Sheets.
-// Як ми обговорювали, ця функція, ймовірно, не використовується у вашому main.go,
-// оскільки main.go використовує google.FindDefaultCredentials для автентифікації.
-// Можливо, її варто буде переглянути або видалити під час рефакторингу.
+// NewService (ймовірно, не використовується, як ми обговорювали)
 func NewService(credentialsJSON []byte) (*sheets.Service, error) {
 	ctx := context.Background()
 	srv, err := sheets.NewService(ctx, option.WithCredentialsJSON(credentialsJSON))
@@ -28,25 +22,28 @@ func NewService(credentialsJSON []byte) (*sheets.Service, error) {
 	return srv, nil
 }
 
-// GenerateProgressReport генерує текстовий звіт про прогрес.
 func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) string {
-	// Назва аркуша та діапазон жорстко закодовані.
-	// Розгляньте можливість зробити їх конфігурованими або передавати як параметри.
-	readRange := "ЩоденнийЗвіт!A2:E2"
+	// ЗМІНЕНО НАЗВУ АРКУША з "ЩоденнийЗвіт" на "Звіт"
+	readRange := "Звіт!A2:E2" // <--- ОСНОВНА ЗМІНА ТУТ!
+
+	// Якщо ваш звіт насправді на іншому аркуші (наприклад, "Мій_Прогресу"),
+	// вкажіть тут його назву. Також переконайтеся, що діапазон A2:E2
+	// на цьому аркуші містить 5 значень, які очікує код (дата, дохід, мета, днів залишилося, потрібно щодня).
+
+	log.Printf("Спроба читання даних з Google Sheets: SpreadsheetID=%s, Range=%s", spreadsheetID, readRange)
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do()
 	if err != nil {
 		log.Printf("Не вдалося отримати дані з Google Sheets: %v", err)
-		return "Помилка отримання звіту."
+		return "Помилка отримання даних зі звіту." // Змінено текст помилки
 	}
 
 	if len(resp.Values) < 1 || len(resp.Values[0]) < 5 {
-		// log.Printf("Недостатньо даних для звіту: отримано %d рядків, очікувався хоча б 1 рядок з 5 колонками", len(resp.Values))
-		return "Недостатньо даних для формування звіту."
+		log.Printf("Недостатньо даних для звіту в діапазоні %s: отримано %d рядків, очікувався хоча б 1 рядок з 5 колонками", readRange, len(resp.Values))
+		return "Недостатньо даних у таблиці для формування звіту." // Змінено текст помилки
 	}
 
 	row := resp.Values[0]
-	// Додамо перевірки на кількість елементів у рядку, щоб уникнути паніки
-	var date, income, goal, daysLeft, requiredDaily interface{} // Використовуємо interface{} для безпечного доступу
+	var date, income, goal, daysLeft, requiredDaily interface{}
 
 	if len(row) > 0 { date = row[0] }
 	if len(row) > 1 { income = row[1] }
@@ -54,20 +51,17 @@ func GenerateProgressReport(srv *sheets.Service, spreadsheetID string) string {
 	if len(row) > 3 { daysLeft = row[3] }
 	if len(row) > 4 { requiredDaily = row[4] }
 
+	log.Printf("Дані з таблиці отримано: Дата=%v, Дохід=%v, Мета=%v, ДнівЗалишилось=%v, ПотрібноЩодня=%v",
+		date, income, goal, daysLeft, requiredDaily)
 
-	// Функція getMotivation() визначена нижче.
-	// Можливо, варто перенести логіку мотиваційних повідомлень
-	// ближче до формування відповіді в пакеті telegram.
 	return fmt.Sprintf(
-		"📅 Дата: %v\n💰 Заробіток: %v$\n🎯 Мета: %v$\n🕒 Днів до кінця місяця: %v\n📈 Потрібно заробляти щодня: %v$\n\n🔥 %s",
-		date, income, goal, daysLeft, requiredDaily, getMotivation(),
+		"📅 Дата з таблиці: %v\n💰 Ваш дохід з таблиці: %v\n🎯 Ваша мета з таблиці: %v\n🕒 Днів до кінця (з таблиці): %v\n📈 Потрібно заробляти щодня (з таблиці): %v\n\n🔥 %s",
+		date, income, goal, daysLeft, requiredDaily, getMotivation(), // getMotivation() визначена нижче
 	)
 }
 
-// getMotivation повертає мотиваційну фразу залежно від часу доби.
 func getMotivation() string {
-	hour := time.Now().Hour() // Використовує поточний час сервера
-
+	hour := time.Now().Hour()
 	switch {
 	case hour < 12:
 		return "Почни цей день потужно — результат не забариться!"
