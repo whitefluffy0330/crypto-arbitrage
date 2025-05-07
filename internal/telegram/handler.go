@@ -13,12 +13,14 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 )
 
+// HandleUpdate обробляє вхідні оновлення
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, spreadsheetID string) {
+	// Обробка CallbackQuery
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
 		log.Printf("Отримано CallbackQuery від [%s] (ChatID: %d), Data: %s", update.CallbackQuery.From.UserName, chatID, update.CallbackQuery.Data)
 		
-		goal.HandleCallback(bot, update.CallbackQuery) 
+		goal.HandleCallback(bot, update.CallbackQuery) // Обробка з підпакета goal
 		callbackConfig := tgbotapi.NewCallback(update.CallbackQuery.ID, "") 
 		if _, err := bot.Request(callbackConfig); err != nil {
 			log.Printf("Помилка відповіді на CallbackQuery: %v", err)
@@ -26,6 +28,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		return
 	}
 
+	// Обробка повідомлень
 	if update.Message == nil {
 		return
 	}
@@ -38,8 +41,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	currentState := GetUserState(chatID)
 
+	// --- Керування станами для введення цілі ---
 	if currentState == StateAwaitingGoalInput {
-		// Перевіряємо, чи введене повідомлення не є однією з команд/кнопок
 		isCommandOrButton := false
 		switch msgText {
 		case "/start", "🔁 Старт", "/stop", "⛔️ Стоп", "/dayoff", "🏖 Вихідний", "/goal", "🎯 Моя ціль", "/closegoal", "❌ Закрити ціль", "/motivation", "/report", "📊 Прогрес":
@@ -49,30 +52,29 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		if isCommandOrButton {
 			log.Printf("Користувач %s (ChatID: %d) був у стані StateAwaitingGoalInput, але надіслав команду/натиснув кнопку '%s'. Скидаємо стан.", userName, chatID, msgText)
 			SetUserState(chatID, StateDefault) 
-			// Дозволяємо обробити команду/кнопку в switch нижче
 		} else {
-			// Якщо це не команда/кнопка, обробляємо як введення цілі
 			log.Printf("Обробка повідомлення від [%s] як введення цілі (стан: %s)", userName, currentState)
-			HandleGoalInput(bot, update.Message) 
+			// Передаємо srv та spreadsheetID в HandleGoalInput
+			HandleGoalInput(bot, update.Message, srv, spreadsheetID) // <<< ЗМІНЕНО ТУТ
 			SetUserState(chatID, StateDefault)
-			// Після введення цілі покажемо головну клавіатуру
-			keyboard.ShowMainKeyboard(bot, chatID)
+			keyboard.ShowMainKeyboard(bot, chatID) // Показуємо клавіатуру після обробки вводу
 			return 
 		}
-		// Оновлюємо currentState, оскільки він міг змінитися
 		currentState = GetUserState(chatID) 
 	}
+	// --- Кінець керування станами ---
 
+	// --- Обробка команд та кнопок ---
 	switch msgText {
 	case "/start", "🔁 Старт":
 		commands.StartWork(bot, update.Message)
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо клавіатуру після дії
+		keyboard.ShowMainKeyboard(bot, chatID) 
 	case "/stop", "⛔️ Стоп":
 		commands.StopWork(bot, update.Message)
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо клавіатуру після дії
+		keyboard.ShowMainKeyboard(bot, chatID) 
 	case "/dayoff", "🏖 Вихідний":
 		commands.DayOff(bot, update.Message, srv, spreadsheetID)
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо клавіатуру після дії
+		keyboard.ShowMainKeyboard(bot, chatID) 
 	case "/goal", "🎯 Моя ціль":
 		log.Printf("Обробка команди /goal для ChatID: %d", chatID)
 		currentGoal, exists := GetUserGoal(chatID) 
@@ -80,9 +82,9 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			log.Printf("Для ChatID %d знайдено існуючу ціль: %+v", chatID, currentGoal)
 			goalInfoText := fmt.Sprintf(
 				"📌 Ваша поточна фінансова ціль:\n\n"+
-					"Сума: %.2f %s\n"+
-					"Термін: %d днів\n"+
-					"Встановлено: %s\n\n"+
+					"Сума: `%.2f %s`\n"+
+					"Термін: `%d днів`\n"+
+					"Встановлено: `%s`\n\n"+
 					"Щоб встановити нову ціль (вона перезапише поточну), натисніть цю кнопку ще раз або введіть /goal.",
 				currentGoal.Amount, currentGoal.Currency, currentGoal.Days, currentGoal.SetDate.Format("02.01.2006"),
 			)
@@ -93,15 +95,13 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			} else {
 				log.Printf("Повідомлення про поточну ціль надіслано для ChatID %d", chatID)
 			}
-			// Після показу поточної цілі, показуємо головну клавіатуру і не переходимо в стан очікування
-			keyboard.ShowMainKeyboard(bot, chatID)
+			keyboard.ShowMainKeyboard(bot, chatID) // Показуємо меню після відображення цілі
 		} else {
 			log.Printf("Для ChatID %d активна ціль не знайдена. Пропонуємо встановити.", chatID)
-			// Якщо цілі немає, пропонуємо встановити
-			goal.HandleMyGoalCommand(bot, chatID) // Функція з підпакета goal, яка надсилає запит "Надішли свою ціль..."
+			goal.HandleMyGoalCommand(bot, chatID) 
 			SetUserState(chatID, StateAwaitingGoalInput)
 			log.Printf("Стан для ChatID %d встановлено в StateAwaitingGoalInput після /goal", chatID)
-			// Клавіатура тут не потрібна, бо користувач має ввести текст
+			// Не показуємо клавіатуру тут, очікуємо текстового вводу
 		}
 
 	case "/closegoal", "❌ Закрити ціль": 
@@ -109,7 +109,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		_, exists := GetUserGoal(chatID)
 		if exists {
 			log.Printf("Закриття існуючої цілі для ChatID %d", chatID)
-			CloseUserGoal(bot, chatID) 
+			// Передаємо srv та spreadsheetID в CloseUserGoal
+			CloseUserGoal(bot, chatID, srv, spreadsheetID) // <<< ЗМІНЕНО ТУТ
 		} else {
 			log.Printf("Немає активної цілі для закриття для ChatID %d", chatID)
 			msg := tgbotapi.NewMessage(chatID, "ℹ️ У вас немає активної цілі для закриття.")
@@ -125,10 +126,10 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		if _, err := bot.Send(msg); err != nil {
 			log.Printf("Помилка надсилання мотиваційного повідомлення для чату %d: %v", chatID, err)
 		}
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо клавіатуру після дії
+		keyboard.ShowMainKeyboard(bot, chatID) 
 	case "/report", "📊 Прогрес":
 		ReportProgress(bot, update.Message, srv, spreadsheetID)
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо клавіатуру після дії
+		// Клавіатуру тут не показуємо, оскільки ReportProgress надсилає своє повідомлення
 	default:
 		log.Printf("Не розпізнана команда або текст від [%s]: %s. Показано головну клавіатуру.", userName, msgText)
 		keyboard.ShowMainKeyboard(bot, chatID)
