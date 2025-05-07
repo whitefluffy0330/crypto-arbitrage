@@ -1,33 +1,88 @@
-package goal
+package telegram // <<< ВИПРАВЛЕНО ТУТ (було package goal)
 
 import (
-	"log"
+	"fmt"
+	"log" 
+	"regexp" 
+	"strconv" 
+	"strings" 
+	"time"   
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	// Додаємо імпорт config для типу config.Config у сигнатурі HandleCallback
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	// Додаємо імпорт gsheets для типу srv у сигнатурі HandleCallback
-	gsheets "google.golang.org/api/sheets/v4"
+	gsheets "google.golang.org/api/sheets/v4" 
 )
 
-// HandleMyGoalCommand надсилає користувачеві запит на введення цілі.
-// Ця функція залишається без змін.
-func HandleMyGoalCommand(bot *tgbotapi.BotAPI, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "🧠 Надішли свою ціль у форматі: 1200 грн, 15 днів")
+// Оголошення 'var userGoals' було видалено звідси раніше.
+
+// HandleGoalInput обробляє введення користувачем тексту цілі.
+// Викликається з handler.go, коли стан користувача StateAwaitingGoalInput.
+func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) { 
+	chatID := message.Chat.ID
+	inputText := message.Text
+
+	log.Printf("Отримано текст для цілі від чату %d: %s", chatID, inputText)
+
+	re := regexp.MustCompile(`^(\d+(?:\.\d{1,2})?)\s*([а-яА-Яa-zA-Z]{3})?\s*,\s*(\d+)\s*(?i:(?:днів|дня|день))?$`)
+	matches := re.FindStringSubmatch(strings.TrimSpace(inputText))
+
+	var goal FinancialGoal 
+	var parsedSuccessfully bool
+
+	if len(matches) >= 4 { 
+		amountStr := matches[1]
+		currencyStr := strings.ToUpper(strings.TrimSpace(matches[2]))
+		daysStr := matches[3]
+		amount, errAmount := strconv.ParseFloat(amountStr, 64)
+		days, errDays := strconv.Atoi(daysStr)
+
+		if errAmount == nil && errDays == nil && days > 0 {
+			if currencyStr == "" {
+				currencyStr = "UAH" 
+			}
+			goal = FinancialGoal{
+				Amount:       amount,
+				Currency:     currencyStr,
+				Days:         days,
+				OriginalText: inputText,
+				SetDate:      time.Now().UTC(),
+			}
+			parsedSuccessfully = true
+		}
+	}
+
+	var responseText string
+	if parsedSuccessfully {
+		err := SetUserGoal(chatID, goal, srv, cfg) 
+		if err != nil {
+			responseText = fmt.Sprintf("⚠️ Відбулася помилка під час збереження вашої цілі у Google Таблицю: %v\nСпробуйте пізніше або перевірте налаштування.", err)
+			log.Printf("Помилка SetUserGoal для ChatID %d: %v", chatID, err)
+		} else {
+			responseText = fmt.Sprintf(
+				"🎯 Чудово! Вашу фінансову ціль встановлено та збережено:\n\n"+
+					"Сума: `%.2f %s`\n"+
+					"Термін: `%d днів`\n"+
+					"Дата встановлення: `%s`",
+				goal.Amount, goal.Currency, goal.Days, goal.SetDate.In(KyivLocation).Format("02.01.2006"), // Використовуємо KyivLocation з telegram.go
+			)
+			log.Printf("Ціль для чату %d успішно розпарсена, збережена: %+v", chatID, goal)
+		}
+	} else {
+		responseText = "⚠️ Не вдалося розпізнати формат цілі...\n"+
+		               "`СУМА [ВАЛЮТА], КІЛЬКІСТЬ_ДНІВ днів`\n\n"+
+		               "Наприклад: `15000 грн, 30 днів`..."
+		log.Printf("Помилка парсингу цілі для чату %d: '%s'", chatID, inputText)
+	}
+
+	msg := tgbotapi.NewMessage(chatID, responseText)
+	msg.ParseMode = tgbotapi.ModeMarkdown 
+
 	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Помилка при відправці HandleMyGoalCommand (підпакет goal): %v", err)
+		log.Printf("Помилка надсилання відповіді HandleGoalInput для чату %d: %v", chatID, err)
 	}
 }
 
-// HandleCallback обробляє callback-запити, пов'язані з цілями.
-// Тепер приймає cfg config.Config.
-// Специфічні callback-и для закриття цілі обробляються в handler.go.
-func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, srv *gsheets.Service, cfg config.Config) { // <<< ОНОВЛЕНА СИГНАТУРА
-	chatID := callback.Message.Chat.ID
-	callbackData := callback.Data
-	userName := callback.From.UserName
-
-	log.Printf("Підпакет goal: HandleCallback отримав дані: '%s' від [%s] (ChatID: %d)", callbackData, userName, chatID)
-
-	// Залишається як заглушка для можливих майбутніх callback-ів цілей.
-}
+/*
+// Закоментована функція HandleCallback (вона тут не використовується)
+func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) { ... }
+*/
