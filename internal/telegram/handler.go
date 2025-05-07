@@ -1,7 +1,7 @@
 package telegram
 
 import (
-	"fmt" // Додано для форматування повідомлення про поточну ціль
+	"fmt"
 	"log"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -17,9 +17,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
 		log.Printf("Отримано CallbackQuery від [%s] (ChatID: %d), Data: %s", update.CallbackQuery.From.UserName, chatID, update.CallbackQuery.Data)
-		goal.HandleCallback(bot, update.CallbackQuery) // Обробка з підпакета goal
-		// Відповідь на CallbackQuery, щоб прибрати "годинник"
-		callbackResp := tgbotapi.NewCallback(update.CallbackQuery.ID, "") // Можна додати текст відповіді
+		goal.HandleCallback(bot, update.CallbackQuery)
+		callbackResp := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 		if _, err := bot.AnswerCallbackQuery(callbackResp); err != nil {
 			log.Printf("Помилка відповіді на CallbackQuery: %v", err)
 		}
@@ -39,11 +38,25 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	currentState := GetUserState(chatID)
 
 	if currentState == StateAwaitingGoalInput {
-		log.Printf("Обробка повідомлення від [%s] як введення цілі (стан: %s)", userName, currentState)
-		HandleGoalInput(bot, update.Message) // Викликаємо HandleGoalInput з goal.go (верхнього рівня)
-		SetUserState(chatID, StateDefault)
-		return
+		// Якщо цей текст є однією з команд/кнопок, не обробляємо як введення цілі,
+		// а дозволяємо обробити в switch нижче, попередньо скинувши стан.
+		// Це запобігає "застряганню" у стані очікування, якщо користувач передумав вводити ціль.
+		switch msgText {
+		case "/start", "🔁 Старт", "/stop", "⛔️ Стоп", "/dayoff", "🏖 Вихідний", "/goal", "🎯 Моя ціль", "/closegoal", "❌ Закрити ціль", "/motivation", "/report", "📊 Прогрес":
+			log.Printf("Користувач %s (ChatID: %d) був у стані StateAwaitingGoalInput, але надіслав команду/натиснув кнопку '%s'. Скидаємо стан.", userName, chatID, msgText)
+			SetUserState(chatID, StateDefault) // Скидаємо стан
+			// Переходимо до звичайної обробки команди нижче
+		default:
+			// Якщо це не команда/кнопка, обробляємо як введення цілі
+			log.Printf("Обробка повідомлення від [%s] як введення цілі (стан: %s)", userName, currentState)
+			HandleGoalInput(bot, update.Message)
+			SetUserState(chatID, StateDefault)
+			return // Важливо завершити тут, щоб не потрапити у switch нижче
+		}
+		// Якщо стан було скинуто через команду/кнопку, оновлюємо currentState для switch
+		currentState = GetUserState(chatID) // Це буде StateDefault
 	}
+
 
 	switch msgText {
 	case "/start", "🔁 Старт":
@@ -53,35 +66,45 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	case "/dayoff", "🏖 Вихідний":
 		commands.DayOff(bot, update.Message, srv, spreadsheetID)
 	case "/goal", "🎯 Моя ціль":
+		log.Printf("Обробка команди /goal для ChatID: %d", chatID)
 		currentGoal, exists := GetUserGoal(chatID) // Отримуємо поточну ціль
 		if exists {
-			// Якщо ціль існує, показуємо її
+			log.Printf("Для ChatID %d знайдено існуючу ціль: %+v", chatID, currentGoal)
 			goalInfoText := fmt.Sprintf(
 				"📌 Ваша поточна фінансова ціль:\n\n"+
 					"Сума: %.2f %s\n"+
 					"Термін: %d днів\n"+
 					"Встановлено: %s\n\n"+
-					"Щоб встановити нову ціль (вона перезапише поточну), просто надішліть її деталі у форматі `СУМА [ВАЛЮТА], КІЛЬКІСТЬ_ДНІВ днів`.",
+					"Щоб встановити нову ціль (вона перезапише поточну), надішліть її деталі у форматі `СУМА [ВАЛЮТА], КІЛЬКІСТЬ_ДНІВ днів` після цього повідомлення.",
 				currentGoal.Amount, currentGoal.Currency, currentGoal.Days, currentGoal.SetDate.Format("02.01.2006"),
 			)
 			msg := tgbotapi.NewMessage(chatID, goalInfoText)
-			msg.ParseMode = tgbotapi.ModeMarkdown // Дозволяємо Markdown для форматування
+			msg.ParseMode = tgbotapi.ModeMarkdown
 			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Помилка надсилання інформації про поточну ціль: %v", err)
+				log.Printf("Помилка надсилання інформації про поточну ціль для ChatID %d: %v", chatID, err)
+			} else {
+				log.Printf("Повідомлення про поточну ціль надіслано для ChatID %d", chatID)
 			}
+		} else {
+			log.Printf("Для ChatID %d активна ціль не знайдена.", chatID)
 		}
-		// Незалежно від того, чи існує стара ціль, пропонуємо встановити нову/оновити
+		// Завжди пропонуємо встановити нову/оновити та встановлюємо стан очікування
 		goal.HandleMyGoalCommand(bot, chatID) // Функція з підпакета goal, яка надсилає запит "Надішли свою ціль..."
 		SetUserState(chatID, StateAwaitingGoalInput)
+		log.Printf("Стан для ChatID %d встановлено в StateAwaitingGoalInput після /goal", chatID)
 
-	case "/closegoal", "❌ Закрити ціль": // Додамо обробку кнопки пізніше
-		currentGoal, exists := GetUserGoal(chatID)
+
+	case "/closegoal", "❌ Закрити ціль":
+		log.Printf("Обробка команди /closegoal для ChatID: %d", chatID)
+		_, exists := GetUserGoal(chatID)
 		if exists {
+			log.Printf("Закриття існуючої цілі для ChatID %d", chatID)
 			CloseUserGoal(bot, chatID) // CloseUserGoal викликає DeleteUserGoal і надсилає повідомлення
 		} else {
+			log.Printf("Немає активної цілі для закриття для ChatID %d", chatID)
 			msg := tgbotapi.NewMessage(chatID, "ℹ️ У вас немає активної цілі для закриття.")
 			if _, err := bot.Send(msg); err != nil {
-				log.Printf("Помилка надсилання повідомлення 'немає цілі для закриття': %v", err)
+				log.Printf("Помилка надсилання повідомлення 'немає цілі для закриття' для ChatID %d: %v", chatID, err)
 			}
 		}
 
@@ -94,7 +117,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	case "/report", "📊 Прогрес":
 		ReportProgress(bot, update.Message, srv, spreadsheetID)
 	default:
-		log.Printf("Не розпізнана команда або текст від [%s]: %s", userName, msgText)
+		log.Printf("Не розпізнана команда або текст від [%s]: %s. Показано головну клавіатуру.", userName, msgText)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	}
 }
