@@ -1,4 +1,4 @@
-package telegram // <<< ВИПРАВЛЕНО ТУТ (було package goal)
+package telegram
 
 import (
 	"fmt"
@@ -9,14 +9,13 @@ import (
 	"time"   
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	// Додаємо імпорти config та sheets
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // <<< ДОДАНО ІМПОРТ sheets
 	gsheets "google.golang.org/api/sheets/v4" 
 )
 
-// Оголошення 'var userGoals' було видалено звідси раніше.
-
 // HandleGoalInput обробляє введення користувачем тексту цілі.
-// Викликається з handler.go, коли стан користувача StateAwaitingGoalInput.
 func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) { 
 	chatID := message.Chat.ID
 	inputText := message.Text
@@ -37,9 +36,7 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gshee
 		days, errDays := strconv.Atoi(daysStr)
 
 		if errAmount == nil && errDays == nil && days > 0 {
-			if currencyStr == "" {
-				currencyStr = "UAH" 
-			}
+			if currencyStr == "" { currencyStr = "UAH" }
 			goal = FinancialGoal{
 				Amount:       amount,
 				Currency:     currencyStr,
@@ -55,15 +52,16 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gshee
 	if parsedSuccessfully {
 		err := SetUserGoal(chatID, goal, srv, cfg) 
 		if err != nil {
-			responseText = fmt.Sprintf("⚠️ Відбулася помилка під час збереження вашої цілі у Google Таблицю: %v\nСпробуйте пізніше або перевірте налаштування.", err)
+			responseText = fmt.Sprintf("⚠️ Помилка збереження цілі у Google Таблицю: %v", err)
 			log.Printf("Помилка SetUserGoal для ChatID %d: %v", chatID, err)
 		} else {
+			// ВИПРАВЛЕНО: Використовуємо sheets.KyivLocation
 			responseText = fmt.Sprintf(
 				"🎯 Чудово! Вашу фінансову ціль встановлено та збережено:\n\n"+
 					"Сума: `%.2f %s`\n"+
 					"Термін: `%d днів`\n"+
 					"Дата встановлення: `%s`",
-				goal.Amount, goal.Currency, goal.Days, goal.SetDate.In(KyivLocation).Format("02.01.2006"), // Використовуємо KyivLocation з telegram.go
+				goal.Amount, goal.Currency, goal.Days, goal.SetDate.In(sheets.KyivLocation).Format("02.01.2006"), // <<< ЗМІНЕНО ТУТ
 			)
 			log.Printf("Ціль для чату %d успішно розпарсена, збережена: %+v", chatID, goal)
 		}
@@ -83,6 +81,6 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gshee
 }
 
 /*
-// Закоментована функція HandleCallback (вона тут не використовується)
+// Закоментована функція HandleCallback 
 func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) { ... }
 */
