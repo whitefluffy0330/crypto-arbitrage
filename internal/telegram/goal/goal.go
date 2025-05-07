@@ -4,6 +4,8 @@ import (
 	"log"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	// Додаємо імпорт config для типу config.Config у сигнатурі HandleCallback
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	// Додаємо імпорт gsheets для типу srv у сигнатурі HandleCallback
 	gsheets "google.golang.org/api/sheets/v4"
 )
@@ -18,29 +20,39 @@ func HandleMyGoalCommand(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 // HandleCallback обробляє callback-запити, пов'язані з цілями.
-// Тепер приймає srv та spreadsheetID, хоча наразі їх не використовує активно,
-// оскільки специфічні callback-и для закриття цілі обробляються в handler.go.
-// Цю функцію можна розширити в майбутньому для іншої логіки inline-кнопок, пов'язаних з цілями.
-func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, srv *gsheets.Service, spreadsheetID string) {
+// Тепер приймає cfg config.Config, хоча наразі її не використовує,
+// оскільки специфічні callback-и обробляються в handler.go.
+// Може бути розширена в майбутньому.
+func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, srv *gsheets.Service, cfg config.Config) { // <<< ЗМІНЕНО СИГНАТУРУ
 	chatID := callback.Message.Chat.ID
 	callbackData := callback.Data
+	userName := callback.From.UserName
 
-	log.Printf("Підпакет goal: HandleCallback отримав дані: '%s' для ChatID: %d. MessageID: %d", callbackData, chatID, callback.Message.MessageID)
+	log.Printf("Підпакет goal: HandleCallback отримав дані: '%s' від [%s] (ChatID: %d)", callbackData, userName, chatID)
 
-	// Наразі основна логіка для 'confirm_close_goal' та 'cancel_close_goal' знаходиться в handler.go (пакет telegram).
-	// Ця функція може обробляти інші специфічні для "цілей" callback-и, якщо вони з'являться.
-	// Наприклад, можна надіслати якесь загальне повідомлення або нічого не робити,
-	// якщо callback вже був оброблений (хоча відповідь на callbackQuery все одно потрібна).
+	// Наразі специфічна логіка для підтвердження/скасування закриття цілі
+	// знаходиться в handler.go (пакет telegram), оскільки вона вимагає
+	// доступу до функції DeleteUserGoal та кешу userGoals з того пакета.
 
-	// Приклад: якщо це якийсь інший callback, не оброблений у handler.go
-	// responseText := fmt.Sprintf("Отримано callback '%s' у модулі цілей.", callbackData)
-	// msg := tgbotapi.NewMessage(chatID, responseText)
-	// if _, err := bot.Send(msg); err != nil {
-	// 	log.Printf("Помилка надсилання відповіді з goal.HandleCallback: %v", err)
-	// }
+	// Ця функція може бути розширена для обробки інших inline-кнопок,
+	// що стосуються цілей (наприклад, редагування цілі, перегляд історії тощо),
+	// якщо ви додасте такий функціонал.
 
-	// Відповідь на CallbackQuery (щоб прибрати "годинник") тепер обробляється в handler.go
-	// після виклику цієї функції або після обробки відомих callbackData.
-	// Якщо ця функція буде самостійно надсилати повідомлення у відповідь на callback,
-	// вона також повинна викликати bot.Request(tgbotapi.NewCallback(...))
+	// Наприклад, можна додати логіку для невідомих callback-ів, що сюди потрапили:
+	switch callbackData {
+	case CallbackConfirmCloseGoal, CallbackCancelCloseGoal:
+		// Ці обробляються в handler.go, тут нічого не робимо
+		log.Printf("Підпакет goal: Callback '%s' оброблено в handler.go", callbackData)
+	default:
+		log.Printf("Підпакет goal: Отримано невідомий callback data '%s'. Поки що ігнорується.", callbackData)
+		// Можна надіслати повідомлення користувачеві або просто проігнорувати.
+		// Відповідь на CallbackQuery (щоб прибрати "годинник") все одно буде надіслано з handler.go.
+	}
 }
+
+// Константи для callback даних (можливо, їх варто винести в спільне місце?)
+// Ці константи вже визначені в handler.go, тут вони для ясності логіки switch
+// const (
+// 	CallbackConfirmCloseGoal = "confirm_close_goal"
+// 	CallbackCancelCloseGoal  = "cancel_close_goal"
+// )
