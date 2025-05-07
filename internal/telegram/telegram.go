@@ -1,32 +1,33 @@
 package telegram
 
 import (
+	"fmt" // Додано для fmt.Errorf
 	"log"
-	"sync" // Для sync.RWMutex
-	"time" // Додамо для дати встановлення цілі
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	// Імпортуємо ваш пакет sheets для Sheets.FinancialGoalData та функцій роботи з таблицею
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
-// --- Структура для фінансової цілі ---
+// --- Структура для фінансової цілі (залишається тут для внутрішнього використання ботом) ---
 type FinancialGoal struct {
-	Amount       float64   // Сума цілі
-	Currency     string    // Валюта (наприклад, "грн", "USD")
-	Days         int       // Кількість днів для досягнення
-	OriginalText string    // Початковий текст, введений користувачем
-	SetDate      time.Time // Дата встановлення цілі
+	Amount       float64
+	Currency     string
+	Days         int
+	OriginalText string
+	SetDate      time.Time
+	// Можна додати ChatID сюди, якщо FinancialGoal буде передаватися як єдина структура
 }
 
-// --- Зберігання даних ---
-
-// userGoals тепер зберігає об'єкти FinancialGoal
+// --- Зберігання даних (в пам'яті як кеш) ---
 var (
-	userGoals      = make(map[int64]FinancialGoal) // Змінено тип значення
+	userGoals      = make(map[int64]FinancialGoal)
 	userGoalsMutex sync.RWMutex
 )
 
-// userStates зберігає поточний стан діалогу для кожного користувача
 var (
 	userStates      = make(map[int64]string)
 	userStatesMutex sync.RWMutex
@@ -34,8 +35,8 @@ var (
 
 // --- Константи для станів ---
 const (
-	StateDefault           = ""
-	StateAwaitingGoalInput  = "awaiting_goal"
+	StateDefault          = ""
+	StateAwaitingGoalInput = "awaiting_goal"
 )
 
 // --- Функції для роботи зі станом користувача (з м'ютексом) ---
@@ -60,18 +61,41 @@ func GetUserState(chatID int64) string {
 	return state
 }
 
-// --- Функції для роботи з цілями (з м'ютексом) ---
-// Ці функції будуть використовуватися HandleGoalInput та іншими
+// --- Функції для роботи з цілями (з м'ютексом ТА інтеграцією з Google Sheets) ---
 
-// SetUserGoal зберігає або оновлює ціль для користувача
-func SetUserGoal(chatID int64, goal FinancialGoal) {
+// SetUserGoal зберігає ціль в пам'яті та намагається додати її в Google Sheet.
+// Тепер повертає помилку, якщо не вдалося записати в таблицю.
+func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, spreadsheetID string) error {
+	// Створюємо дані для передачі в пакет sheets
+	goalDataForSheet := sheets.FinancialGoalData{
+		Amount:       goal.Amount,
+		Currency:     goal.Currency,
+		Days:         goal.Days,
+		OriginalText: goal.OriginalText,
+		SetDate:      goal.SetDate,
+	}
+
+	// Намагаємося додати ціль у Google Sheet
+	err := sheets.AddGoalToSheet(srv, spreadsheetID, chatID, goalDataForSheet)
+	if err != nil {
+		log.Printf("ПОМИЛКА при спробі записати ціль у Google Sheet для ChatID %d: %v", chatID, err)
+		// Вирішуємо, чи встановлювати ціль в пам'яті, якщо не вдалося записати в таблицю.
+		// Поки що, для простоти, повернемо помилку і не будемо зберігати в пам'яті,
+		// щоб забезпечити консистентність. Або можна зберігати в пам'яті, але повідомити користувача.
+		return fmt.Errorf("не вдалося зберегти ціль у Google Таблиці: %w", err)
+	}
+
+	// Якщо запис у таблицю успішний, зберігаємо також у локальний кеш (мапу)
 	userGoalsMutex.Lock()
 	defer userGoalsMutex.Unlock()
 	userGoals[chatID] = goal
-	log.Printf("Ціль для чату %d встановлено/оновлено: %+v", chatID, goal)
+	log.Printf("Ціль для чату %d встановлено/оновлено в пам'яті та Google Sheets: %+v", chatID, goal)
+	return nil // Успіх
 }
 
-// GetUserGoal отримує поточну ціль користувача
+// GetUserGoal отримує поточну активну ціль користувача з пам'яті.
+// TODO: У майбутньому можна додати логіку завантаження активної цілі з Google Sheets при старті бота
+// або якщо цілі немає в пам'яті.
 func GetUserGoal(chatID int64) (FinancialGoal, bool) {
 	userGoalsMutex.RLock()
 	defer userGoalsMutex.RUnlock()
@@ -79,14 +103,25 @@ func GetUserGoal(chatID int64) (FinancialGoal, bool) {
 	return goal, exists
 }
 
-// DeleteUserGoal видаляє ціль для користувача (може знадобитися для /closegoal)
-func DeleteUserGoal(chatID int64) {
+// DeleteUserGoal видаляє ціль з пам'яті та намагається оновити її статус у Google Sheet.
+// Тепер повертає помилку, якщо не вдалося оновити статус в таблиці.
+func DeleteUserGoal(chatID int64, srv *gsheets.Service, spreadsheetID string) error {
+	// Намагаємося оновити статус цілі в Google Sheet
+	err := sheets.UpdateGoalStatusInSheet(srv, spreadsheetID, chatID, "Закрита", time.Now().UTC())
+	if err != nil {
+		log.Printf("ПОМИЛКА при спробі оновити статус цілі в Google Sheet на 'Закрита' для ChatID %d: %v", chatID, err)
+		// Повертаємо помилку. Вирішіть, чи видаляти з пам'яті, якщо в таблиці не оновилося.
+		// Поки що, для консистентності, не будемо видаляти з пам'яті, якщо не оновили в таблиці.
+		return fmt.Errorf("не вдалося оновити статус цілі у Google Таблиці: %w", err)
+	}
+	
+	// Якщо оновлення статусу в таблиці успішне, видаляємо з локального кешу (мапи)
 	userGoalsMutex.Lock()
 	defer userGoalsMutex.Unlock()
 	delete(userGoals, chatID)
-	log.Printf("Ціль для чату %d видалено", chatID)
+	log.Printf("Ціль для чату %d видалено з пам'яті та оновлено статус у Google Sheets.", chatID)
+	return nil // Успіх
 }
-
 
 // --- Основні функції бота ---
 func InitBot(token string) (*tgbotapi.BotAPI, error) {
