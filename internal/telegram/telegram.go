@@ -3,16 +3,26 @@ package telegram
 import (
 	"log"
 	"sync" // Для sync.RWMutex
+	"time" // Додамо для дати встановлення цілі
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	gsheets "google.golang.org/api/sheets/v4" // Використовуємо gsheets для типу srv *gsheets.Service
+	gsheets "google.golang.org/api/sheets/v4"
 )
+
+// --- Структура для фінансової цілі ---
+type FinancialGoal struct {
+	Amount       float64   // Сума цілі
+	Currency     string    // Валюта (наприклад, "грн", "USD")
+	Days         int       // Кількість днів для досягнення
+	OriginalText string    // Початковий текст, введений користувачем
+	SetDate      time.Time // Дата встановлення цілі
+}
 
 // --- Зберігання даних ---
 
-// userGoals зберігає цілі користувачів (приклад: map[chatID]goalDescription)
+// userGoals тепер зберігає об'єкти FinancialGoal
 var (
-	userGoals      = make(map[int64]string)
+	userGoals      = make(map[int64]FinancialGoal) // Змінено тип значення
 	userGoalsMutex sync.RWMutex
 )
 
@@ -24,19 +34,15 @@ var (
 
 // --- Константи для станів ---
 const (
-	StateDefault          = "" // Звичайний стан
-	StateAwaitingGoalInput = "awaiting_goal" // Очікуємо введення цілі
-	// Тут можна додавати інші стани для інших діалогів
+	StateDefault           = ""
+	StateAwaitingGoalInput  = "awaiting_goal"
 )
 
 // --- Функції для роботи зі станом користувача (з м'ютексом) ---
-
-// SetUserState встановлює стан для користувача
 func SetUserState(chatID int64, state string) {
-	userStatesMutex.Lock() // Блокуємо на запис
-	defer userStatesMutex.Unlock() // Гарантуємо розблокування
+	userStatesMutex.Lock()
+	defer userStatesMutex.Unlock()
 	if state == StateDefault {
-		// Видаляємо зі стану, щоб не засмічувати мапу
 		delete(userStates, chatID)
 	} else {
 		userStates[chatID] = state
@@ -44,21 +50,45 @@ func SetUserState(chatID int64, state string) {
 	log.Printf("Встановлено стан '%s' для чату %d", state, chatID)
 }
 
-// GetUserState отримує поточний стан користувача
 func GetUserState(chatID int64) string {
-	userStatesMutex.RLock() // Блокуємо на читання
-	defer userStatesMutex.RUnlock() // Гарантуємо розблокування
+	userStatesMutex.RLock()
+	defer userStatesMutex.RUnlock()
 	state, exists := userStates[chatID]
 	if !exists {
-		return StateDefault // Якщо запису немає, вважаємо стан звичайним
+		return StateDefault
 	}
 	return state
 }
 
+// --- Функції для роботи з цілями (з м'ютексом) ---
+// Ці функції будуть використовуватися HandleGoalInput та іншими
+
+// SetUserGoal зберігає або оновлює ціль для користувача
+func SetUserGoal(chatID int64, goal FinancialGoal) {
+	userGoalsMutex.Lock()
+	defer userGoalsMutex.Unlock()
+	userGoals[chatID] = goal
+	log.Printf("Ціль для чату %d встановлено/оновлено: %+v", chatID, goal)
+}
+
+// GetUserGoal отримує поточну ціль користувача
+func GetUserGoal(chatID int64) (FinancialGoal, bool) {
+	userGoalsMutex.RLock()
+	defer userGoalsMutex.RUnlock()
+	goal, exists := userGoals[chatID]
+	return goal, exists
+}
+
+// DeleteUserGoal видаляє ціль для користувача (може знадобитися для /closegoal)
+func DeleteUserGoal(chatID int64) {
+	userGoalsMutex.Lock()
+	defer userGoalsMutex.Unlock()
+	delete(userGoals, chatID)
+	log.Printf("Ціль для чату %d видалено", chatID)
+}
+
 
 // --- Основні функції бота ---
-
-// InitBot створює екземпляр бота
 func InitBot(token string) (*tgbotapi.BotAPI, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -68,41 +98,33 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) {
 	return bot, nil
 }
 
-// HandleUpdates - головний цикл обробки оновлень
 func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, spreadsheetID string) {
 	log.Println("Розпочато обробку оновлень...")
 	for update := range updates {
-		// Передаємо обробку окремого оновлення функції HandleUpdate з handler.go
 		HandleUpdate(bot, update, srv, spreadsheetID)
 	}
 	log.Println("Зупинено обробку оновлень (канал закрито).")
 }
 
-// SetWebhook - встановлює вебхук
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
 	fullWebhookURL := webhookBaseURL + webhookPath
 	log.Printf("Встановлення вебхука на: %s", fullWebhookURL)
-
 	var whCfg tgbotapi.WebhookConfig
-	var errWh error 
-
+	var errWh error
 	if certFilePath != "" {
 		whCfg, errWh = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
 	} else {
 		whCfg, errWh = tgbotapi.NewWebhook(fullWebhookURL)
 	}
-
 	if errWh != nil {
 		log.Printf("Помилка створення конфігурації вебхука: %v", errWh)
 		return errWh
 	}
-
 	_, errReq := bot.Request(whCfg)
 	if errReq != nil {
 		log.Printf("Помилка встановлення вебхука (bot.Request): %v", errReq)
 		return errReq
 	}
-
 	info, errInfo := bot.GetWebhookInfo()
 	if errInfo != nil {
 		log.Printf("Помилка отримання інформації про вебхук: %v", errInfo)
@@ -118,7 +140,6 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	return nil
 }
 
-// RemoveWebhook - видаляє вебхук
 func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
@@ -128,5 +149,3 @@ func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	log.Println("Вебхук успішно видалено.")
 	return nil
 }
-
-// TODO: Далі можуть бути функції для роботи з userGoals (Get/Set/Delete)
