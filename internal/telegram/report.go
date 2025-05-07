@@ -3,7 +3,7 @@ package telegram
 import (
 	"fmt"
 	"log"
-	"math" // Цей імпорт потрібен для math.Inf()
+	// "math" // Імпорт "math" ВИДАЛЕНО
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -49,7 +49,7 @@ func ReportProgress(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Se
 				daysPassedSinceGoalSet = int(currentDateForCalc.Sub(startDateOfGoalInKyiv).Hours() / 24)
 				if daysPassedSinceGoalSet < 0 { daysPassedSinceGoalSet = 0 }
 			} else {
-				daysPassedSinceGoalSet = 0 
+				daysPassedSinceGoalSet = 0
 			}
 
 			calendarDaysLeftForGoal := currentUserGoal.Days - daysPassedSinceGoalSet
@@ -63,32 +63,29 @@ func ReportProgress(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Se
 				if progressPercentage > 100 { progressPercentage = 100 }
 				if progressPercentage < 0 { progressPercentage = 0 }
 			}
-			
+
 			goalEndDate := currentUserGoal.SetDate.In(kyivLocation).AddDate(0, 0, currentUserGoal.Days)
 			currentDateForWorkingDaysCalc := time.Now().In(kyivLocation)
 			
 			var actualWorkingDaysLeft int
 			var errWorkingDays error
 
-			// Перевіряємо, чи дата початку підрахунку робочих днів не пізніше дати кінця цілі
 			if !currentDateForWorkingDaysCalc.After(goalEndDate) {
 				actualWorkingDaysLeft, errWorkingDays = sheets.CountWorkingDaysInRange(srv, spreadsheetID, currentDateForWorkingDaysCalc, goalEndDate)
 				if errWorkingDays != nil {
 					log.Printf("Помилка підрахунку робочих днів для ChatID %d: %v. Будуть використані календарні дні.", chatID, errWorkingDays)
-					actualWorkingDaysLeft = calendarDaysLeftForGoal 
+					actualWorkingDaysLeft = calendarDaysLeftForGoal
 				}
 			} else {
-				actualWorkingDaysLeft = 0 // Якщо ціль вже мала завершитися
+				actualWorkingDaysLeft = 0
 				log.Printf("Підрахунок робочих днів: ціль вже мала завершитися (%s), робочих днів 0.", goalEndDate.Format("2006-01-02"))
 			}
-
 
 			var requiredDailySmartStr string
 			if remainingToAchieve <= 0 {
 				requiredDailySmartStr = "0.00 (Ціль досягнуто!)"
 			} else if actualWorkingDaysLeft <= 0 {
-				// requiredDailyNow = math.Inf(1) // Ця змінна не використовується для формування рядка
-				requiredDailySmartStr = "∞ (Робочий час вийшов або не заплановано робочих днів!)" // Використання math.Inf(1) тут
+				requiredDailySmartStr = "∞ (Робочий час вийшов або не заплановано робочих днів!)" // Просто використовуємо символ
 			} else {
 				requiredDailySmart := remainingToAchieve / float64(actualWorkingDaysLeft)
 				requiredDailySmartStr = fmt.Sprintf("%.2f", requiredDailySmart)
@@ -114,19 +111,14 @@ func ReportProgress(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Se
 				currentUserGoal.Amount, currentUserGoal.Currency,
 				currentUserGoal.Days,
 				currentUserGoal.SetDate.In(kyivLocation).Format("02.01.2006"),
-				
-				sheetData.Date, 
-				
+				sheetData.Date,
 				amountAchievedSoFar, currentUserGoal.Currency,
 				remainingToAchieve, currentUserGoal.Currency,
 				progressPercentage,
-				
 				daysPassedSinceGoalSet, currentUserGoal.Days,
 				calendarDaysLeftForGoal,
 				actualWorkingDaysLeft,
-				
 				requiredDailySmartStr, currentUserGoal.Currency,
-				
 				motivation.GetRandomMotivation(),
 			)
 		}
