@@ -1,80 +1,95 @@
 package commands
 
 import (
-	"fmt" // Додано для форматування повідомлень
+	"fmt"
 	"log"
-	"time" // Додано для роботи з часом
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	// Імпортуємо пакет sheets для виклику функцій роботи з таблицею
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
-// StartWork тепер логує початок роботи в Google Sheets
+// getCurrentTimeInKyiv (копія з sheets.go, або краще винести в окремий shared утилітний пакет, якщо буде багато таких)
+// Або просто передавати time.Now() і нехай пакет sheets сам розбирається з часовою зоною
+var kyivLocationCommands *time.Location 
+
+func init() {
+	loc, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		log.Printf("Критична помилка в commands: не вдалося завантажити часову зону Europe/Kyiv: %v. Буде використано UTC.", err)
+		kyivLocationCommands = time.UTC
+	} else {
+		kyivLocationCommands = loc
+	}
+}
+
+func getCurrentTimeInKyivCommands() time.Time {
+	return time.Now().In(kyivLocationCommands)
+}
+
+
 func StartWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
-	log.Printf("Команда /start для ChatID %d", msg.Chat.ID)
-	now := time.Now().UTC() // Використовуємо UTC для універсальності
+	chatID := msg.Chat.ID
+	log.Printf("Команда /start для ChatID %d", chatID)
+	// Передаємо поточний час. Пакет sheets подбає про часову зону.
+	startTime := time.Now() 
 	
-	// TODO: Реалізувати функцію sheets.LogWorkStart в пакеті sheets
-	err := sheets.LogWorkStart(srv, spreadsheetID, msg.Chat.ID, now) // Передаємо час початку
+	err := sheets.LogWorkStart(srv, spreadsheetID, chatID, startTime)
 
 	var text string
 	if err != nil {
-		log.Printf("Помилка логування початку роботи в Google Sheets для ChatID %d: %v", msg.Chat.ID, err)
+		log.Printf("Помилка логування початку роботи в Google Sheets для ChatID %d: %v", chatID, err)
 		text = fmt.Sprintf("✅ Робочий день розпочато, але сталася помилка при записі у таблицю: %v", err)
 	} else {
-		text = fmt.Sprintf("✅ Робочий день розпочато о %s (UTC). Успішної роботи!", now.Format("15:04:05"))
+		// Для відображення користувачу, конвертуємо час у Київський
+		text = fmt.Sprintf("✅ Робочий день розпочато о %s (за Києвом). Успішної роботи!", startTime.In(kyivLocationCommands).Format("15:04:05"))
 	}
 	
-	message := tgbotapi.NewMessage(msg.Chat.ID, text)
+	message := tgbotapi.NewMessage(chatID, text)
 	if _, sendErr := bot.Send(message); sendErr != nil {
-		log.Printf("Помилка при відправці повідомлення StartWork для ChatID %d: %v", msg.Chat.ID, sendErr)
+		log.Printf("Помилка при відправці повідомлення StartWork для ChatID %d: %v", chatID, sendErr)
 	}
 }
 
-// StopWork тепер логує завершення роботи та тривалість в Google Sheets
 func StopWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
-	log.Printf("Команда /stop для ChatID %d", msg.Chat.ID)
-	now := time.Now().UTC()
+	chatID := msg.Chat.ID
+	log.Printf("Команда /stop для ChatID %d", chatID)
+	endTime := time.Now()
 
-	// TODO: Реалізувати функцію sheets.LogWorkStop в пакеті sheets
-	duration, err := sheets.LogWorkStop(srv, spreadsheetID, msg.Chat.ID, now) // Передаємо час завершення
+	duration, err := sheets.LogWorkStop(srv, spreadsheetID, chatID, endTime)
 
 	var text string
 	if err != nil {
-		log.Printf("Помилка логування завершення роботи в Google Sheets для ChatID %d: %v", msg.Chat.ID, err)
+		log.Printf("Помилка логування завершення роботи в Google Sheets для ChatID %d: %v", chatID, err)
 		text = fmt.Sprintf("🛑 Робочий день завершено, але сталася помилка при записі у таблицю: %v", err)
 	} else {
-		// Форматуємо тривалість для читабельності
-		durationStr := duration.Truncate(time.Second).String() // Наприклад, "1h2m3s"
-		text = fmt.Sprintf("🛑 Робочий день завершено о %s (UTC). Тривалість: %s. Гарного відпочинку!", now.Format("15:04:05"), durationStr)
+		text = fmt.Sprintf("🛑 Робочий день завершено о %s (за Києвом). Тривалість: %s. Гарного відпочинку!", endTime.In(kyivLocationCommands).Format("15:04:05"), sheets.FormatDuration(duration)) // Використовуємо sheets.FormatDuration
 	}
 
-	message := tgbotapi.NewMessage(msg.Chat.ID, text)
+	message := tgbotapi.NewMessage(chatID, text)
 	if _, sendErr := bot.Send(message); sendErr != nil {
-		log.Printf("Помилка при відправці повідомлення StopWork для ChatID %d: %v", msg.Chat.ID, sendErr)
+		log.Printf("Помилка при відправці повідомлення StopWork для ChatID %d: %v", chatID, sendErr)
 	}
 }
 
-// DayOff тепер логує вихідний день в Google Sheets
 func DayOff(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, spreadsheetID string) {
-	log.Printf("Команда /dayoff для ChatID %d", msg.Chat.ID)
-	now := time.Now().UTC()
+	chatID := msg.Chat.ID
+	log.Printf("Команда /dayoff для ChatID %d", chatID)
+	dateToLog := time.Now() // Функція LogDayOff в sheets сама розбереться з датою та часовою зоною
 
-	// TODO: Реалізувати функцію sheets.LogDayOff в пакеті sheets
-	err := sheets.LogDayOff(srv, spreadsheetID, msg.Chat.ID, now.Format("2006-01-02")) // Передаємо дату
+	err := sheets.LogDayOff(srv, spreadsheetID, chatID, dateToLog)
 
 	var text string
 	if err != nil {
-		log.Printf("Помилка логування вихідного дня в Google Sheets для ChatID %d: %v", msg.Chat.ID, err)
+		log.Printf("Помилка логування вихідного дня в Google Sheets для ChatID %d: %v", chatID, err)
 		text = fmt.Sprintf("📅 Сьогодні вихідний. Сталася помилка при записі у таблицю: %v", err)
 	} else {
-		text = "📅 Статус 'Вихідний' на сьогодні встановлено в таблиці."
+		text = fmt.Sprintf("📅 Статус 'Вихідний' на %s (за Києвом) встановлено в таблиці.", dateToLog.In(kyivLocationCommands).Format("02.01.2006"))
 	}
 
-	message := tgbotapi.NewMessage(msg.Chat.ID, text)
+	message := tgbotapi.NewMessage(chatID, text)
 	if _, sendErr := bot.Send(message); sendErr != nil {
-		log.Printf("Помилка при відправці повідомлення DayOff для ChatID %d: %v", msg.Chat.ID, sendErr)
+		log.Printf("Помилка при відправці повідомлення DayOff для ChatID %d: %v", chatID, sendErr)
 	}
 }
