@@ -147,4 +147,6 @@ func CountWorkingDaysInRange(srv *sheets.Service, spreadsheetID string, workLogS
 // FormatDuration ... (код без змін) ...
 func FormatDuration(d time.Duration) string { /*...*/ return "" }
 
-/*
+/* // Закоментовано getMotivation
+func getMotivation() string { ... }
+*/
