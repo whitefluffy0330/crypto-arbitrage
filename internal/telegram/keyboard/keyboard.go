@@ -2,7 +2,7 @@ package keyboard
 
 import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"log" // Додано для логування помилки Send
+	"log"
 )
 
 // ShowMainKeyboard показує головну клавіатуру користувачу
@@ -11,6 +11,7 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🎯 Моя ціль"),
 			tgbotapi.NewKeyboardButton("📊 Прогрес"),
+			tgbotapi.NewKeyboardButton("💹 Funding Rates"), // <<< НОВА КНОПКА
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔁 Старт"),
@@ -18,10 +19,11 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 			tgbotapi.NewKeyboardButton("🏖 Вихідний"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("❌ Закрити ціль"), // Кнопка для закриття цілі
+			tgbotapi.NewKeyboardButton("❌ Закрити ціль"),
+			tgbotapi.NewKeyboardButton("/add_investment"), // Поки що команда, можна зробити кнопкою
 		),
 	)
-	keyboard.ResizeKeyboard = true // Можна розкоментувати, щоб клавіатура підлаштовувалася під розмір
+	keyboard.ResizeKeyboard = true 
 
 	msg := tgbotapi.NewMessage(chatID, "Оберіть опцію з меню:")
 	msg.ReplyMarkup = keyboard
@@ -31,8 +33,6 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 // CreateConfirmationKeyboard створює inline-клавіатуру "Так/Ні"
-// yesCallbackData - дані для кнопки "Так"
-// noCallbackData - дані для кнопки "Ні"
 func CreateConfirmationKeyboard(yesCallbackData, noCallbackData string) tgbotapi.InlineKeyboardMarkup {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
