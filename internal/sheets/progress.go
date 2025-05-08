@@ -2,9 +2,7 @@ package sheets
 
 import (
 	"fmt"
-	"log"
-	"strconv"
-	"strings" 
+	"log" 
 	"time"
 
 	"google.golang.org/api/sheets/v4"
