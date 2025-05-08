@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time" // Потрібен для форматування NextFundingTime у /funding
+	// "time" // ВИДАЛЕНО, оскільки time.Time використовується через інші пакети
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance" // Для GetFundingRates
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal" // Підпакет goal
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 	gsheets "google.golang.org/api/sheets/v4"
@@ -37,7 +37,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			originalText := ""; if update.CallbackQuery.Message != nil { originalText = update.CallbackQuery.Message.Text }; editText := tgbotapi.NewEditMessageText(chatID, messageID, originalText+"\n\n"+callbackText); bot.Send(editText)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		default:
-			log.Printf("Передача Callback '%s' в goal.HandleCallback", callbackData); goal.HandleCallback(bot, update.CallbackQuery, srv, cfg)
+			log.Printf("Передача Callback '%s' в goal.HandleCallback", callbackData)
+			goal.HandleCallback(bot, update.CallbackQuery, srv, cfg) // ВИКОРИСТАННЯ підпакета goal
 		}
 		answerCallback := tgbotapi.NewCallback(update.CallbackQuery.ID, ""); if _, err := bot.Request(answerCallback); err != nil { log.Printf("Помилка AnswerCallbackQuery: %v", err) }
 		return
@@ -62,42 +63,70 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	case "/start", "🔁 Старт": commands.StartWork(bot, update.Message, srv, cfg); keyboard.ShowMainKeyboard(bot, chatID) 
 	case "/stop", "⛔️ Стоп": commands.StopWork(bot, update.Message, srv, cfg); keyboard.ShowMainKeyboard(bot, chatID) 
 	case "/dayoff", "🏖 Вихідний": commands.DayOff(bot, update.Message, srv, cfg); keyboard.ShowMainKeyboard(bot, chatID) 
-	case "/goal", "🎯 Моя ціль": log.Printf("Обробка /goal для %d", chatID); currentGoal, exists := GetUserGoal(chatID, srv, cfg); if exists { log.Printf("Знайдено ціль для %d: %+v", chatID, currentGoal); goalInfoText := fmt.Sprintf("📌 Ваша поточна ціль:\n\nСума: `%.2f %s`\nТермін: `%d днів`\nВстановлено: `%s`\n\nЩоб встановити нову...", currentGoal.Amount, currentGoal.Currency, currentGoal.Days, currentGoal.SetDate.In(sheets.KyivLocation).Format("02.01.2006")); msg := tgbotapi.NewMessage(chatID, goalInfoText); msg.ParseMode = tgbotapi.ModeMarkdown; if _, err := bot.Send(msg); err != nil {log.Printf("Помилка: %v", err)} else {log.Printf("Інфо-ціль %d", chatID)}; keyboard.ShowMainKeyboard(bot, chatID) } else { log.Printf("Активна ціль для %d не знайдена.", chatID); goal.HandleMyGoalCommand(bot, chatID); SetUserState(chatID, StateAwaitingGoalInput); log.Printf("Стан %d -> awaiting_goal", chatID) }
-	case "/closegoal", "❌ Закрити ціль": log.Printf("Обробка /closegoal для %d", chatID); currentGoal, exists := GetUserGoal(chatID, srv, cfg); if exists { confirmationText := fmt.Sprintf("❓ Впевнені?\nСума: `%.2f %s`\nТермін: `%d дн.`\nВстановлено: `%s`", currentGoal.Amount, currentGoal.Currency, currentGoal.Days, currentGoal.SetDate.In(sheets.KyivLocation).Format("02.01.2006")); msg := tgbotapi.NewMessage(chatID, confirmationText); msg.ParseMode = tgbotapi.ModeMarkdown; msg.ReplyMarkup = keyboard.CreateConfirmationKeyboard(CallbackConfirmCloseGoal, CallbackCancelCloseGoal); if _, err := bot.Send(msg); err != nil {log.Printf("Помилка підтвердження: %v", err)} } else { log.Printf("Немає цілі для закриття для %d", chatID); msg := tgbotapi.NewMessage(chatID, "ℹ️ Активної цілі немає."); if _, err := bot.Send(msg); err != nil {log.Printf("Помилка 'немає цілі': %v", err)}; keyboard.ShowMainKeyboard(bot, chatID) }
-	case "/add_investment": log.Printf("Обробка /add_investment для %d", chatID); prompt := "➕ Введіть інвестицію:\n`ТИП, НАЗВА, СУМА ВАЛЮТА, ДАТА (РРРР-ММ-ДД)`\nПриклад: `Акція, AAPL, 1000 USD, 2024-03-15`"; msg := tgbotapi.NewMessage(chatID, prompt); msg.ParseMode = tgbotapi.ModeMarkdown; if _, err := bot.Send(msg); err != nil {log.Printf("Помилка запиту інвестиції: %v", err)} else { SetUserState(chatID, StateAwaitingInvestmentInput); log.Printf("Стан %d -> awaiting_investment", chatID) }
+	case "/goal", "🎯 Моя ціль": 
+		log.Printf("Обробка /goal для %d", chatID); currentGoal, exists := GetUserGoal(chatID, srv, cfg) 
+		if exists { 
+			log.Printf("Знайдено ціль для %d: %+v", chatID, currentGoal); 
+			goalInfoText := fmt.Sprintf("📌 Ваша поточна ціль:\n\nСума: `%.2f %s`\nТермін: `%d днів`\nВстановлено: `%s`\n\nЩоб встановити нову...", currentGoal.Amount, currentGoal.Currency, currentGoal.Days, currentGoal.SetDate.In(sheets.KyivLocation).Format("02.01.2006")); 
+			msg := tgbotapi.NewMessage(chatID, goalInfoText); msg.ParseMode = tgbotapi.ModeMarkdown; 
+			if _, err := bot.Send(msg); err != nil {log.Printf("Помилка: %v", err)} else {log.Printf("Інфо-ціль %d", chatID)}; 
+			keyboard.ShowMainKeyboard(bot, chatID) 
+		} else { 
+			log.Printf("Активна ціль для %d не знайдена.", chatID); 
+			goal.HandleMyGoalCommand(bot, chatID); // ВИКОРИСТАННЯ підпакета goal
+			SetUserState(chatID, StateAwaitingGoalInput); 
+			log.Printf("Стан %d -> awaiting_goal", chatID) 
+		}
+	case "/closegoal", "❌ Закрити ціль": 
+		log.Printf("Обробка /closegoal для %d", chatID); currentGoal, exists := GetUserGoal(chatID, srv, cfg) 
+		if exists { 
+			confirmationText := fmt.Sprintf("❓ Впевнені?\nСума: `%.2f %s`\nТермін: `%d дн.`\nВстановлено: `%s`", currentGoal.Amount, currentGoal.Currency, currentGoal.Days, currentGoal.SetDate.In(sheets.KyivLocation).Format("02.01.2006")); 
+			msg := tgbotapi.NewMessage(chatID, confirmationText); msg.ParseMode = tgbotapi.ModeMarkdown; 
+			msg.ReplyMarkup = keyboard.CreateConfirmationKeyboard(CallbackConfirmCloseGoal, CallbackCancelCloseGoal); 
+			if _, err := bot.Send(msg); err != nil {log.Printf("Помилка підтвердження: %v", err)} 
+		} else { 
+			log.Printf("Немає цілі для закриття для %d", chatID); 
+			msg := tgbotapi.NewMessage(chatID, "ℹ️ У вас немає активної цілі."); if _, err := bot.Send(msg); err != nil {log.Printf("Помилка 'немає цілі': %v", err)}; 
+			keyboard.ShowMainKeyboard(bot, chatID) 
+		}
+	case "/add_investment": 
+		log.Printf("Обробка /add_investment для %d", chatID); 
+		prompt := "➕ Введіть інвестицію:\n`ТИП, НАЗВА, СУМА ВАЛЮТА, ДАТА (РРРР-ММ-ДД)`\nПриклад: `Акція, AAPL, 1000 USD, 2024-03-15`"; 
+		msg := tgbotapi.NewMessage(chatID, prompt); msg.ParseMode = tgbotapi.ModeMarkdown; 
+		if _, err := bot.Send(msg); err != nil {log.Printf("Помилка запиту інвестиції: %v", err)} else { SetUserState(chatID, StateAwaitingInvestmentInput); log.Printf("Стан %d -> awaiting_investment", chatID) }
 	
-	// Оновлений кейс для /funding
-	case "/funding", "💹 Funding Rates":
-		log.Printf("Обробка команди /funding для ChatID: %d", chatID)
-		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки фінансування Binance...")
+	case "/funding", "💹 Funding Rates": // ВИКОРИСТАННЯ binance
+		log.Printf("Обробка команди /funding для ChatID: %d", chatID); 
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки Binance..."); 
 		sentMsg, _ := bot.Send(loadingMsg)
-
-		rates, err := binance.GetFundingRates() // Виклик функції з пакету binance
-		var fundingReportText string
-		if err != nil {
-			log.Printf("Помилка отримання funding rates: %v", err)
-			fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати ставки: %v", err)
+		rates, err := binance.GetFundingRates(); var fundingReportText string
+		if err != nil { log.Printf("Помилка funding rates: %v", err); fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати ставки: %v", err)
 		} else {
-			if len(rates) == 0 { fundingReportText = "Інформація про ставки фінансування недоступна." } else {
+			if len(rates) == 0 { fundingReportText = "Інформація про ставки недоступна." } else {
 				var sb strings.Builder; sb.WriteString("📊 **Funding Rates (Binance Futures):**\n\n");
-				symbolsToShow := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"} // Можна розширити
-				shownCount := 0
+				symbolsToShow := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"}; shownCount := 0
 				for _, symbol := range symbolsToShow {
 					if info, ok := rates[symbol]; ok {
-						nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
+						// Використовуємо sheets.KyivLocation для форматування часу
+						nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation) 
 						sb.WriteString(fmt.Sprintf("`%s`:\n  Rate: `%.4f%%` (Next: %s)\n  Mark: `%.2f`\n\n", info.Symbol, info.LastFundingRate, nextTimeKyiv.Format("15:04"), info.MarkPrice))
 						shownCount++
 					}
 				}
-				if shownCount == 0 { sb.WriteString("Не знайдено даних для стандартних символів.") }
-				fundingReportText = sb.String()
+				if shownCount == 0 { sb.WriteString("Не знайдено даних для стандартних символів.") }; fundingReportText = sb.String()
 			}
 		}
 		if sentMsg.MessageID != 0 { editText := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, fundingReportText); editText.ParseMode = tgbotapi.ModeMarkdown; bot.Send(editText) } else { finalMsg := tgbotapi.NewMessage(chatID, fundingReportText); finalMsg.ParseMode = tgbotapi.ModeMarkdown; bot.Send(finalMsg) }
 		keyboard.ShowMainKeyboard(bot, chatID)
 
-	case "/motivation": motivationText := motivation.GetRandomMotivation(); msg := tgbotapi.NewMessage(chatID, motivationText); if _, err := bot.Send(msg); err != nil { log.Printf("Помилка мотивації: %v", err) }; keyboard.ShowMainKeyboard(bot, chatID) 
-	case "/report", "📊 Прогрес": ReportProgress(bot, update.Message, srv, cfg) 
-	default: log.Printf("Не розпізнана команда: [%s]: %s.", userName, msgText); keyboard.ShowMainKeyboard(bot, chatID)
+	case "/motivation": // ВИКОРИСТАННЯ motivation
+		motivationText := motivation.GetRandomMotivation(); 
+		msg := tgbotapi.NewMessage(chatID, motivationText); if _, err := bot.Send(msg); err != nil { log.Printf("Помилка мотивації: %v", err) }; 
+		keyboard.ShowMainKeyboard(bot, chatID) 
+	case "/report", "📊 Прогрес":
+		ReportProgress(bot, update.Message, srv, cfg) 
+	default:
+		log.Printf("Не розпізнана команда: [%s]: %s.", userName, msgText)
+		keyboard.ShowMainKeyboard(bot, chatID)
 	}
 }
