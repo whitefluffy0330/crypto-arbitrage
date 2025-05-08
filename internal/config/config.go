@@ -10,44 +10,30 @@ import (
 type Config struct {
 	BotToken         string
 	SpreadsheetID    string
-	ChatID           int64 // Можливо, для адмінських повідомлень або звітів за замовчуванням
+	ChatID           int64 // Для адмінських повідомлень/звітів
 
-	// Конфігурація Google Sheets (назви аркушів та діапазонів)
-	SheetNameReport         string // Назва аркуша для зчитування звіту (наприклад, "Звіт")
-	SheetRangeReport        string // Діапазон для зчитування звіту (наприклад, "A2:E2")
-	SheetNameUserGoals      string // Назва аркуша для цілей користувачів (наприклад, "МоїЦілі")
-	SheetRangeUserGoals     string // Діапазон для операцій з цілями (наприклад, "A:H")
-	SheetNameWorkLog        string // Назва аркуша для робочого графіка (наприклад, "РобочийГрафік")
-	SheetRangeWorkLogDates  string // Діапазон для читання дат/статусів робочого графіка (наприклад, "A:B")
-	SheetRangeWorkLogFull   string // Діапазон для запису повного рядка робочого графіка (наприклад, "A:E")
+	// Конфігурація Google Sheets
+	SheetNameReport         string 
+	SheetRangeReport        string 
+	SheetNameUserGoals      string 
+	SheetRangeUserGoals     string 
+	SheetNameWorkLog        string 
+	SheetRangeWorkLogDates  string 
+	SheetRangeWorkLogFull   string 
 
-	// Нові поля для Webhook та TLS
-	WebhookBaseURL    string // Базовий URL для вебхука (https://your.domain.com) - ОБОВ'ЯЗКОВО
-	WebhookPath       string // Секретний шлях для вебхука (напр., /hook/telegram_update_...) - ОБОВ'ЯЗКОВО
-	WebhookListenAddr string // Адреса та порт для слухання вебхуків (напр., ":443" або ":8443")
-	WebhookCertPath   string // Шлях до публічного сертифіката для SetWebhook (опціонально)
-	TLSCertPath       string // Шлях до fullchain.pem для ListenAndServeTLS - ОБОВ'ЯЗКОВО для HTTPS
-	TLSKeyPath        string // Шлях до privkey.pem для ListenAndServeTLS - ОБОВ'ЯЗКОВО для HTTPS
+	// Конфігурація Webhook та TLS
+	WebhookBaseURL    string 
+	WebhookPath       string 
+	WebhookListenAddr string 
+	WebhookCertPath   string 
+	TLSCertPath       string 
+	TLSKeyPath        string 
 }
 
 // LoadEnv завантажує конфігурацію зі змінних середовища
 func LoadEnv() Config {
-	// Завантаження існуючих змінних
 	botToken := os.Getenv("TELEGRAM_TOKEN")
 	spreadsheetID := os.Getenv("SPREADSHEET_ID")
-
-	// Завантаження та перевірка ChatID
-	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
-	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
-	if err != nil && chatIDStr != "" { // Якщо змінна встановлена, але не є числом
-		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося розпарсити TELEGRAM_CHAT_ID '%s': %v. Буде використано 0.", chatIDStr, err)
-		chatID = 0 
-	} else if chatIDStr == "" {
-		log.Printf("ПОПЕРЕДЖЕННЯ: Змінна середовища TELEGRAM_CHAT_ID не встановлена.")
-		chatID = 0 
-	}
-
-	// Нові обов'язкові змінні для Webhook/TLS
 	webhookBaseURL := os.Getenv("WEBHOOK_BASE_URL") 
 	webhookPath := os.Getenv("WEBHOOK_PATH")       
 	tlsCertPath := os.Getenv("TLS_CERT_PATH")      
@@ -61,11 +47,31 @@ func LoadEnv() Config {
 	if tlsCertPath == "" { log.Fatal("Критична помилка: Змінна середовища TLS_CERT_PATH не встановлена.") }
 	if tlsKeyPath == "" { log.Fatal("Критична помилка: Змінна середовища TLS_KEY_PATH не встановлена.") }
 
+	// Завантаження та перевірка ChatID (з покращеним логуванням)
+	var chatID int64 
+	chatIDStr := os.Getenv("TELEGRAM_CHAT_ID")
+	if chatIDStr == "" {
+		// Якщо змінна не встановлена зовсім, це може бути нормально. Логуємо як попередження.
+		log.Printf("ПОПЕРЕДЖЕННЯ: Змінна середовища TELEGRAM_CHAT_ID не встановлена. ChatID буде 0.")
+		// chatID залишається 0 (нульове значення для int64)
+	} else {
+		// Якщо змінна встановлена, намагаємося її розпарсити.
+		parsedChatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+		if err != nil {
+			// Якщо не вдалося розпарсити (напр., там текст замість числа) - це помилка конфігурації.
+			log.Printf("ПОМИЛКА: Не вдалося розпарсити TELEGRAM_CHAT_ID '%s': %v. ChatID буде 0.", chatIDStr, err)
+			// Вирішіть, чи є ця помилка критичною. Якщо ChatID обов'язковий, можна зробити log.Fatal тут.
+			// Поки що залишаємо 0.
+			chatID = 0 
+		} else {
+			chatID = parsedChatID // Присвоюємо розпарсений ID
+		}
+	}
 
 	cfg := Config{
 		BotToken:         botToken,
 		SpreadsheetID:    spreadsheetID,
-		ChatID:           chatID,
+		ChatID:           chatID, // Використовуємо отриманий або нульовий chatID
 
 		SheetNameReport:         getEnv("SHEET_NAME_REPORT", "Звіт"),
 		SheetRangeReport:        getEnv("SHEET_RANGE_REPORT", "A2:E2"), 
@@ -77,24 +83,23 @@ func LoadEnv() Config {
 
 		WebhookBaseURL:    webhookBaseURL,
 		WebhookPath:       webhookPath,
-		WebhookListenAddr: getEnv("WEBHOOK_LISTEN_ADDR", ":443"), // Порт за замовчуванням 443
-		WebhookCertPath:   os.Getenv("WEBHOOK_CERT_PATH"),        // Опціональний, може бути порожнім
+		WebhookListenAddr: getEnv("WEBHOOK_LISTEN_ADDR", ":443"), 
+		WebhookCertPath:   os.Getenv("WEBHOOK_CERT_PATH"),       
 		TLSCertPath:       tlsCertPath,
 		TLSKeyPath:        tlsKeyPath,
 	}
 
-	log.Printf("Конфігурацію завантажено: SpreadsheetID=%s, ReportSheet='%s!%s', GoalsSheet='%s', WorkLogSheet='%s', Webhook=%s%s, Listen=%s",
+	log.Printf("Конфігурацію завантажено: SpreadsheetID=%s, ReportSheet='%s!%s', GoalsSheet='%s', WorkLogSheet='%s', Webhook=%s%s, Listen=%s, AdminChatID=%d",
 		cfg.SpreadsheetID, cfg.SheetNameReport, cfg.SheetRangeReport,
-		cfg.SheetNameUserGoals, cfg.SheetNameWorkLog, cfg.WebhookBaseURL, cfg.WebhookPath, cfg.WebhookListenAddr)
+		cfg.SheetNameUserGoals, cfg.SheetNameWorkLog, cfg.WebhookBaseURL, cfg.WebhookPath, cfg.WebhookListenAddr, cfg.ChatID)
 
 	return cfg
 }
 
-// getEnv допоміжна функція для отримання змінної середовища зі значенням за замовчуванням
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists && value != "" {
 		return value
 	}
-	log.Printf("ПОПЕРЕДЖЕННЯ: Змінна середовища %s не встановлена або порожня, використовується значення за замовчуванням: '%s'", key, fallback)
+	log.Printf("ПОПЕРЕДЖЕННЯ: Змінна середовища %s не встановлена або порожня, використовується '%s'", key, fallback)
 	return fallback
 }
