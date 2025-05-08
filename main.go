@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	// "fmt" // Видалено
 	"log"
 	"net/http"
-	"strings" // Потрібен для перевірки шляху вебхука
+	"strings"
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
-	// tgbotapi не потрібен напряму
-	
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	gsheets "google.golang.org/api/sheets/v4"
@@ -26,65 +23,58 @@ func appContext() context.Context {
 func main() {
 	motivation.InitMotivationSeed()
 
-	cfg := config.LoadEnv() 
+	cfg := config.LoadEnv()
 
-	bot, err := telegram.InitBot(cfg.BotToken) 
+	// === Крок ініціалізації бота ===
+	log.Println("Спроба ініціалізації бота...")
+	bot, err := telegram.InitBot(cfg.BotToken)
+
+	// <<< ДОДАНО ЛОГУВАННЯ >>>
+	// Логуємо значення bot та err одразу після виклику InitBot
+	log.Printf("Результат telegram.InitBot: bot=%v, err=%v", bot, err)
+	// <<< Кінець логування >>>
+
+	// Перевіряємо помилку від InitBot
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	if bot == nil { // Перевіряємо сам об'єкт бота
-		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
+	// Перевіряємо сам об'єкт бота
+	if bot == nil {
+		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil, хоча помилки не було).")
 	}
-	
-	// ОБХІДНА ПЕРЕВІРКА: Замість bot.Self == nil, перевіряємо bot.Self.ID == 0
-	// Це ризиковано, якщо bot.Self дійсно nil, але спробуємо задовольнити компілятор.
-	var botUsername string = "[ім'я невідоме]" // Значення за замовчуванням
-	if bot.Self.ID == 0 { 
-		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати коректний ID бота (bot.Self.ID is 0). Ім'я користувача може бути невірним. Перевірте токен або зв'язок з API Telegram.")
-		// Не завершуємо роботу, але ім'я буде невідомим
+	// Перевіряємо ID бота як обхідний шлях для перевірки bot.Self
+	var botUsername string = "[ім'я невідоме]"
+	if bot.Self.ID == 0 {
+		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати коректний ID бота (bot.Self.ID is 0). Перевірте токен.")
 	} else {
-		// Якщо ID не нульовий, припускаємо, що можна отримати UserName
-		botUsername = bot.Self.UserName 
+		botUsername = bot.Self.UserName
 	}
-	log.Printf("Бот @%s ініціалізовано.", botUsername) // Використовуємо безпечну змінну
+	log.Printf("Бот @%s ініціалізовано.", botUsername)
+	// === Кінець ініціалізації бота ===
 
-	// Формуємо шлях для вебхука
+	// Налаштування вебхука
 	webhookPath := cfg.WebhookPath
-	if !strings.HasPrefix(webhookPath, "/") {
-		webhookPath = "/" + webhookPath
-		log.Printf("ПОПЕРЕДЖЕННЯ: Додано '/' на початок WEBHOOK_PATH. Використовується шлях: %s", webhookPath)
-	}
-	// Примітка: Переконайтеся, що cfg.WebhookPath містить ваш секретний шлях.
-	// НЕ використовуйте тут bot.Token для формування шляху з міркувань безпеки.
+	if !strings.HasPrefix(webhookPath, "/") { webhookPath = "/" + webhookPath }
+	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
+	if err != nil { log.Printf("ПОМИЛКА встановлення вебхука: %v", err) }
 
-	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath) 
-	if err != nil {
-		log.Printf("ПОМИЛКА встановлення вебхука (продовжуємо роботу): %v", err)
-	}
-
+	// Google Sheets
 	ctx := appContext()
-	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
-	if err != nil {
-		log.Fatalf("Помилка авторизації Google Sheets: %v", err)
-	}
+	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope)
+	if err != nil { log.Fatalf("Помилка авторизації Google Sheets: %v", err) }
 	sheetsService, err := gsheets.NewService(ctx, option.WithCredentials(credentials))
-	if err != nil {
-		log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err)
-	}
+	if err != nil { log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err) }
 
-	updates := bot.ListenForWebhook(webhookPath) 
-
+	// Запуск слухача вебхуків та HTTPS сервера
+	updates := bot.ListenForWebhook(webhookPath)
 	go func() {
 		log.Printf("Запуск HTTPS сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
-		err_https := http.ListenAndServeTLS(cfg.WebhookListenAddr, cfg.TLSCertPath, cfg.TLSKeyPath, nil) 
-		if err_https != nil {
-			log.Printf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTPS СЕРВЕРА: %v", err_https) 
-		}
+		err_https := http.ListenAndServeTLS(cfg.WebhookListenAddr, cfg.TLSCertPath, cfg.TLSKeyPath, nil)
+		if err_https != nil { log.Printf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTPS СЕРВЕРА: %v", err_https) }
 	}()
 
-	log.Printf("Бот @%s готовий до роботи та очікує на оновлення через вебхук...", botUsername) 
+	log.Printf("Бот @%s готовий до роботи та очікує на оновлення через вебхук...", botUsername)
 
-	// telegram.StartEveningReport(bot, sheetsService, cfg) 
-
-	telegram.HandleUpdates(updates, bot, sheetsService, cfg) 
+	// Обробка оновлень
+	telegram.HandleUpdates(updates, bot, sheetsService, cfg)
 }
