@@ -2,17 +2,17 @@ package main
 
 import (
 	"context"
-	"fmt" // Додаємо fmt для помилки
+	// "fmt" // ВИДАЛЕНО НЕПОТРІБНИЙ ІМПОРТ
 	"log"
 	"net/http"
-	"strings"
+	"strings" 
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
-	// tgbotapi більше не потрібен напряму
+	// tgbotapi тут більше не потрібен
 	
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -25,25 +25,25 @@ func appContext() context.Context {
 
 func main() {
 	motivation.InitMotivationSeed()
-
-	// var _ tgbotapi.Update // Цей рядок більше не потрібен, видаляємо його
+	// Діагностичний рядок var _ tgbotapi.Update видалено
 
 	cfg := config.LoadEnv() 
 
-	bot, err := telegram.InitBot(cfg.BotToken)
+	bot, err := telegram.InitBot(cfg.BotToken) 
+	// Перевіряємо помилку від InitBot
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	
-	// <<< ПОКРАЩЕННЯ: Додаткова перевірка bot.Self >>>
-	if bot == nil || bot.Self == nil {
-		// Ця ситуація не повинна виникати, якщо InitBot не повернув помилку,
-		// але додаємо перевірку про всяк випадок.
+	// ВИПРАВЛЕНО: Перевіряємо bot на nil ОКРЕМО
+	if bot == nil {
+		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil) після ініціалізації.")
+	}
+	// Тільки якщо bot не nil, перевіряємо bot.Self
+	if bot.Self == nil { 
 		log.Fatal("Критична помилка: Не вдалося отримати інформацію про бота (bot.Self is nil) після ініціалізації.")
 	}
-	// <<< Кінець покращення >>>
-
-	log.Printf("Бот @%s ініціалізовано.", bot.Self.UserName) // Тепер ця лінія безпечна
+	// Тепер безпечно використовувати bot.Self.UserName
+	log.Printf("Бот @%s ініціалізовано.", bot.Self.UserName) 
 
 	webhookPath := cfg.WebhookPath
 	if !strings.HasPrefix(webhookPath, "/") {
@@ -53,7 +53,6 @@ func main() {
 
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath) 
 	if err != nil {
-		// Не робимо Fatal, можливо вебхук вже встановлено або є тимчасова проблема
 		log.Printf("ПОМИЛКА встановлення вебхука (продовжуємо роботу): %v", err)
 	}
 
@@ -73,8 +72,9 @@ func main() {
 		log.Printf("Запуск HTTPS сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
 		err_https := http.ListenAndServeTLS(cfg.WebhookListenAddr, cfg.TLSCertPath, cfg.TLSKeyPath, nil) 
 		if err_https != nil {
-			// Використовуємо log.Printf замість log.Fatalf, щоб не зупиняти основний потік обробки оновлень, якщо він ще працює
 			log.Printf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTPS СЕРВЕРА: %v", err_https) 
+			// Можливо, тут варто теж викликати log.Fatal або інший механізм зупинки,
+			// оскільки без HTTPS сервера вебхук не працюватиме. Але поки залишимо Printf.
 		}
 	}()
 
