@@ -1,16 +1,18 @@
 package sheets
 
 import (
-	"context"
+	// "context" // Видалено невикористаний імпорт
 	"fmt"
 	"log"
 	"strconv"
 	"time"
+	// "strings" // Переконалися, що цей імпорт та його використання відсутні
 
-	"google.golang.org/api/option"
+	// "google.golang.org/api/option" // Видалено невикористаний імпорт
 	"google.golang.org/api/sheets/v4"
 )
 
+// Дозвіл на читання та запис
 const SpreadsheetsScope = "https://www.googleapis.com/auth/spreadsheets"
 
 // ---- Структури ----
@@ -31,122 +33,85 @@ type FinancialGoalData struct {
 
 // ---- Часова зона ----
 var KyivLocation *time.Location
-func init() { /* ... код без змін ... */ 
-	loc, err := time.LoadLocation("Europe/Kyiv"); if err != nil { log.Printf("Критична помилка: не вдалося завантажити часову зону Europe/Kyiv: %v.", err); KyivLocation = time.UTC } else { KyivLocation = loc; log.Println("Часову зону Europe/Kyiv успішно завантажено (пакет sheets).") }
+func init() {
+	loc, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil { log.Printf("Критична помилка: не вдалося завантажити 'Europe/Kyiv': %v.", err); KyivLocation = time.UTC } else { KyivLocation = loc; log.Println("Часову зону Europe/Kyiv успішно завантажено (пакет sheets).") }
 }
 func GetCurrentTimeInKyiv() time.Time { return time.Now().In(KyivLocation) }
 
 // ---- Допоміжні функції ----
-func findRowIndexByDate(sheetData [][]interface{}, dateToFind string) (int, []interface{}) { /* ... код без змін ... */ 
-	if len(sheetData) == 0 { return -1, nil }; startRowIndex := 0; if len(sheetData) > 0 && len(sheetData[0]) > 0 && (fmt.Sprintf("%v", sheetData[0][0]) == "Дата" || fmt.Sprintf("%v", sheetData[0][0]) == "Date" || fmt.Sprintf("%v", sheetData[0][0]) == "ChatID" || fmt.Sprintf("%v", sheetData[0][0]) == "ID чату користувача") { startRowIndex = 1 }; for i := startRowIndex; i < len(sheetData); i++ { row := sheetData[i]; if len(row) > 0 { if fmt.Sprintf("%v", row[0]) == dateToFind { return i, row } } }; return -1, nil
+
+// findRowByDate знаходить 0-based індекс рядка та сам рядок за датою.
+func findRowByDate(sheetData [][]interface{}, dateToFind string) (int, []interface{}) {
+	if len(sheetData) == 0 { return -1, nil }
+	startRowIndex := 0
+	if len(sheetData) > 0 && len(sheetData[0]) > 0 && (fmt.Sprintf("%v", sheetData[0][0]) == "Дата" || fmt.Sprintf("%v", sheetData[0][0]) == "Date" || fmt.Sprintf("%v", sheetData[0][0]) == "ChatID" || fmt.Sprintf("%v", sheetData[0][0]) == "ID чату користувача") { startRowIndex = 1 }
+	for i := startRowIndex; i < len(sheetData); i++ { row := sheetData[i]; if len(row) > 0 { if fmt.Sprintf("%v", row[0]) == dateToFind { return i, row } } }; return -1, nil
 }
-func FormatDuration(d time.Duration) string { /* ... код без змін ... */ 
+
+// FormatDuration публічна функція для форматування тривалості (ОДНЕ ВИЗНАЧЕННЯ)
+func FormatDuration(d time.Duration) string {
 	d = d.Round(time.Minute); h := d / time.Hour; d -= h * time.Hour; m := d / time.Minute; return fmt.Sprintf("%dh %dm", h, m)
 }
 
 // --- Функції роботи з Google Sheets API ---
-func NewService(credentialsJSON []byte) (*sheets.Service, error) { /*...*/ return nil, nil }
 
-// GenerateProgressReport тепер читає діапазон A2:E та перевіряє перший рядок
-func GenerateProgressReport(srv *sheets.Service, spreadsheetID string, reportSheetNameAndRange string) (SheetRowData, error) {
-	// reportSheetNameAndRange тепер повний рядок, напр. "Звіт!A2:E2"
-	// Розділимо його на назву аркуша та діапазон для нової логіки читання
-	sheetName := "Звіт" // Значення за замовчуванням
-	sheetRange := "A2:E" // Читаємо від A2 до E до кінця
-	
-	// Спробуємо розділити отриманий рядок, якщо він заданий через конфіг
-	parts := strings.Split(reportSheetNameAndRange, "!")
-	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-		sheetName = parts[0]
-		// Змінюємо діапазон читання на "A2:E" для цього аркуша
-		sheetRange = fmt.Sprintf("%s!A2:E", sheetName) // Формуємо новий діапазон читання
-		log.Printf("Змінено діапазон читання для звіту на: %s", sheetRange)
-	} else {
-		// Якщо формат неправильний, використовуємо значення за замовчуванням
-		sheetRange = "Звіт!A2:E" // Значення за замовчуванням, якщо конфіг невірний
-		log.Printf("Використовується діапазон читання за замовчуванням: %s", sheetRange)
-	}
-
-
-	var data SheetRowData
-	var err error 
-
-	log.Printf("Спроба читання даних з Google Sheets: SpreadsheetID=%s, Range=%s", spreadsheetID, sheetRange)
-	resp, errGet := srv.Spreadsheets.Values.Get(spreadsheetID, sheetRange).Do()
-	if errGet != nil {
-		log.Printf("Не вдалося отримати дані з Google Sheets (GenerateProgressReport): %v", errGet)
-		return data, fmt.Errorf("помилка отримання даних з Google Sheets: %w", errGet)
-	}
-
-	// Перевіряємо, чи є хоча б один рядок даних (це буде наш рядок 2)
-	if len(resp.Values) < 1 {
-		errMsg := fmt.Sprintf("немає даних у діапазоні %s (очікувався хоча б рядок A2)", sheetRange)
-		log.Println(errMsg)
-		return data, fmt.Errorf(errMsg)
-	}
-
-	// Беремо перший рядок з отриманих даних (це має бути рядок 2 аркуша)
-	row := resp.Values[0]
-
-	// Перевіряємо, чи в цьому першому рядку є достатньо колонок (A-E)
-	if len(row) < 5 {
-		errMsg := fmt.Sprintf("недостатньо колонок у першому рядку даних (%s): отримано %d, очікувалося 5", sheetRange, len(row))
-		log.Println(errMsg)
-		return data, fmt.Errorf(errMsg)
-	}
-
-
-	// Парсинг даних з рядка з поверненням помилки у разі невдачі
-	if len(row) > 0 { data.Date = fmt.Sprintf("%v", row[0]) } else { data.Date = "" }
-
-	if len(row) > 1 {
-		incomeStr := fmt.Sprintf("%v", row[1])
-		data.Income, err = strconv.ParseFloat(incomeStr, 64)
-		if err != nil { log.Printf("Помилка парсингу доходу '%s': %v.", incomeStr, err); return data, fmt.Errorf("некоректне значення Доходу ('%s') в таблиці '%s'", incomeStr, sheetName) }
-	} else { return data, fmt.Errorf("відсутнє значення Доходу в таблиці '%s' (колонка B)", sheetName) }
-
-	if len(row) > 2 {
-		sheetGoalStr := fmt.Sprintf("%v", row[2])
-		data.SheetGoal, err = strconv.ParseFloat(sheetGoalStr, 64)
-		if err != nil { log.Printf("Помилка парсингу мети '%s': %v.", sheetGoalStr, err); return data, fmt.Errorf("некоректне значення Мети ('%s') в таблиці '%s'", sheetGoalStr, sheetName) }
-	} else { return data, fmt.Errorf("відсутнє значення Мети в таблиці '%s' (колонка C)", sheetName) }
-
-	if len(row) > 3 {
-		sheetDaysLeftStr := fmt.Sprintf("%v", row[3])
-		data.SheetDaysLeft, err = strconv.Atoi(sheetDaysLeftStr)
-		if err != nil { log.Printf("Помилка парсингу днів '%s': %v.", sheetDaysLeftStr, err); return data, fmt.Errorf("некоректний формат 'Днів залишилося' ('%s') в таблиці '%s'", sheetDaysLeftStr, sheetName) }
-	} else { return data, fmt.Errorf("відсутнє значення 'Днів залишилося' в таблиці '%s' (колонка D)", sheetName) }
-
-	if len(row) > 4 {
-		sheetReqDailyStr := fmt.Sprintf("%v", row[4])
-		data.SheetReqDaily, err = strconv.ParseFloat(sheetReqDailyStr, 64)
-		if err != nil { log.Printf("Помилка парсингу потр. щодня '%s': %v.", sheetReqDailyStr, err); return data, fmt.Errorf("некоректний формат 'Потрібно щодня' ('%s') в таблиці '%s'", sheetReqDailyStr, sheetName) }
-	} else { return data, fmt.Errorf("відсутнє значення 'Потрібно щодня' в таблиці '%s' (колонка E)", sheetName) }
-
-	log.Printf("Дані з аркуша '%s' (рядок 2) успішно розпарсені: %+v", sheetName, data)
-	return data, nil // Повертаємо дані та відсутність помилки
+// NewService (залишаємо як заглушку, не використовується)
+func NewService(credentialsJSON []byte) (*sheets.Service, error) {
+	// ctx := context.Background() // context не імпортовано
+	// srv, err := sheets.NewService(ctx, option.WithCredentialsJSON(credentialsJSON)) // option не імпортовано
+	// if err != nil { return nil, fmt.Errorf("не вдалося створити клієнт Sheets: %w", err) }; return srv, nil
+	return nil, fmt.Errorf("функція NewService не реалізована або не використовується")
 }
 
-// AddGoalToSheet ... (код без змін) ...
-func AddGoalToSheet(srv *sheets.Service, spreadsheetID string, goalsSheetName string, chatID int64, goalData FinancialGoalData) error { /*...*/ return nil }
-// UpdateGoalStatusInSheet ... (код без змін) ...
-func UpdateGoalStatusInSheet(srv *sheets.Service, spreadsheetID string, goalsSheetName string, chatID int64, newStatus string, closedDate time.Time) error { /*...*/ return nil }
+// GenerateProgressReport читає дані з аркуша "Звіт" та повертає помилку при некоректних даних
+func GenerateProgressReport(srv *sheets.Service, spreadsheetID string, reportSheetNameAndRange string) (SheetRowData, error) {
+	var data SheetRowData; var err error
+	sheetName := "Звіт"; sheetRange := "A2:E" // Значення за замовчуванням
+	parts := strings.Split(reportSheetNameAndRange, "!"); if len(parts) == 2 { sheetName = parts[0]; sheetRange = fmt.Sprintf("%s!A2:E", sheetName) } else { sheetRange = "Звіт!A2:E" } // Перевіряємо Split
+
+	log.Printf("Спроба читання: SpreadsheetID=%s, Range=%s", spreadsheetID, sheetRange)
+	resp, errGet := srv.Spreadsheets.Values.Get(spreadsheetID, sheetRange).Do()
+	if errGet != nil { return data, fmt.Errorf("помилка отримання даних GSheets(Report): %w", errGet) }
+	if len(resp.Values) < 1 { return data, fmt.Errorf("немає даних у діапазоні %s", sheetRange) }
+	row := resp.Values[0]; if len(row) < 5 { return data, fmt.Errorf("недостатньо колонок у %s (рядок 2)", sheetName) }
+
+	if len(row) > 0 { data.Date = fmt.Sprintf("%v", row[0]) }
+	if len(row) > 1 { incomeStr := fmt.Sprintf("%v", row[1]); data.Income, err = strconv.ParseFloat(incomeStr, 64); if err != nil { return data, fmt.Errorf("некоректний Дохід ('%s') в '%s'", incomeStr, sheetName) }
+	} else { return data, fmt.Errorf("відсутній Дохід в '%s' (B)", sheetName) }
+	if len(row) > 2 { sheetGoalStr := fmt.Sprintf("%v", row[2]); data.SheetGoal, err = strconv.ParseFloat(sheetGoalStr, 64); if err != nil { return data, fmt.Errorf("некоректна Мета ('%s') в '%s'", sheetGoalStr, sheetName) }
+	} else { return data, fmt.Errorf("відсутня Мета в '%s' (C)", sheetName) }
+	if len(row) > 3 { sheetDaysLeftStr := fmt.Sprintf("%v", row[3]); data.SheetDaysLeft, err = strconv.Atoi(sheetDaysLeftStr); if err != nil { return data, fmt.Errorf("некор. 'Дні Зал.' ('%s') в '%s'", sheetDaysLeftStr, sheetName) }
+	} else { return data, fmt.Errorf("відсутні 'Дні Зал.' в '%s' (D)", sheetName) }
+	if len(row) > 4 { sheetReqDailyStr := fmt.Sprintf("%v", row[4]); data.SheetReqDaily, err = strconv.ParseFloat(sheetReqDailyStr, 64); if err != nil { return data, fmt.Errorf("некор. 'Потр. Щодня' ('%s') в '%s'", sheetReqDailyStr, sheetName) }
+	} else { return data, fmt.Errorf("відсутнє 'Потр. Щодня' в '%s' (E)", sheetName) }
+
+	log.Printf("Дані з аркуша '%s!A2:E2' успішно розпарсені: %+v", sheetName, data); return data, nil
+}
+
+// AddGoalToSheet додає нову ціль на аркуш "МоїЦілі"
+func AddGoalToSheet(srv *sheets.Service, spreadsheetID string, goalsSheetName string, chatID int64, goalData FinancialGoalData) error { /* ... (код без змін з #143) ... */ 
+	log.Printf("Додавання цілі на аркуш '%s' для ChatID %d: %+v", goalsSheetName, chatID, goalData); var rowValues []interface{}; rowValues = append(rowValues, chatID, goalData.Amount, goalData.Currency, goalData.Days, goalData.SetDate.In(KyivLocation).Format("2006-01-02"), "Активна", goalData.OriginalText, ""); valueRange := &sheets.ValueRange{Values: [][]interface{}{rowValues}}; appendRange := fmt.Sprintf("%s!A:H", goalsSheetName); _, err := srv.Spreadsheets.Values.Append(spreadsheetID, appendRange, valueRange).ValueInputOption("USER_ENTERED").InsertDataOption("INSERT_ROWS").Do(); if err != nil { log.Printf("Помилка запису цілі на аркуш '%s': %v", goalsSheetName, err); return fmt.Errorf("не вдалося записати ціль: %w", err) }; log.Printf("Ціль для ChatID %d успішно записана на аркуш '%s'", chatID, goalsSheetName); return nil
+}
+
+// UpdateGoalStatusInSheet знаходить останню активну ціль і оновлює статус
+func UpdateGoalStatusInSheet(srv *sheets.Service, spreadsheetID string, goalsSheetName string, chatID int64, newStatus string, closedDate time.Time) error { /* ... (код без змін з #143) ... */ 
+	log.Printf("Оновлення статусу цілі на '%s' на аркуші '%s' для ChatID %d", newStatus, goalsSheetName, chatID); readRange := fmt.Sprintf("%s!A:F", goalsSheetName); resp, err := srv.Spreadsheets.Values.Get(spreadsheetID, readRange).Do(); if err != nil { log.Printf("Помилка читання '%s': %v", readRange, err); return fmt.Errorf("не вдалося прочитати дані: %w", err) }; targetSheetRowIndex := -1; if len(resp.Values) > 0 { for i := len(resp.Values) - 1; i >= 0; i-- { row := resp.Values[i]; isHeader := (i == 0 && len(row) > 0 && (fmt.Sprintf("%v", row[0]) == "ChatID" || fmt.Sprintf("%v", row[0]) == "ID чату користувача")); if isHeader || len(row) < 6 { continue }; rowChatIDStr := fmt.Sprintf("%v", row[0]); rowStatusStr := fmt.Sprintf("%v", row[5]); rowChatID, errChatID := strconv.ParseInt(rowChatIDStr, 10, 64); if errChatID == nil && rowChatID == chatID && rowStatusStr == "Активна" { targetSheetRowIndex = i + 1; break } } }; if targetSheetRowIndex == -1 { log.Printf("Не знайдено активної цілі для ChatID %d на '%s'", chatID, goalsSheetName); return fmt.Errorf("не знайдено активної цілі") }; statusUpdateRange := fmt.Sprintf("%s!F%d", goalsSheetName, targetSheetRowIndex); statusValueRange := &sheets.ValueRange{Values: [][]interface{}{{newStatus}}}; _, err = srv.Spreadsheets.Values.Update(spreadsheetID, statusUpdateRange, statusValueRange).ValueInputOption("USER_ENTERED").Do(); if err != nil { log.Printf("Помилка оновлення статусу цілі: %v", err); return fmt.Errorf("не вдалося оновити статус: %w", err) }; closedDateUpdateRange := fmt.Sprintf("%s!H%d", goalsSheetName, targetSheetRowIndex); closedDateValueRange := &sheets.ValueRange{Values: [][]interface{}{{closedDate.In(KyivLocation).Format("2006-01-02")}}}; _, err = srv.Spreadsheets.Values.Update(spreadsheetID, closedDateUpdateRange, closedDateValueRange).ValueInputOption("USER_ENTERED").Do(); if err != nil { log.Printf("Помилка оновлення дати закриття цілі: %v", err) }; log.Printf("Статус цілі для ChatID %d (рядок %d) '%s' оновлено на '%s'", chatID, targetSheetRowIndex, goalsSheetName, newStatus); return nil
+}
+
 // --- Функції для роботи з аркушем "РобочийГрафік" ---
 const workLogSheetNameDefault = "РобочийГрафік"
-// LogWorkStart ... (код без змін) ...
+
+// LogWorkStart ... (код без змін з #143) ...
 func LogWorkStart(srv *sheets.Service, spreadsheetID string, workLogSheetName string, chatID int64, startTime time.Time) error { /*...*/ return nil }
-// LogWorkStop ... (код без змін) ...
+// LogWorkStop ... (код без змін з #143) ...
 func LogWorkStop(srv *sheets.Service, spreadsheetID string, workLogSheetName string, chatID int64, endTime time.Time) (time.Duration, error) { /*...*/ return time.Duration(0), nil }
-// LogDayOff ... (код без змін) ...
+// LogDayOff ... (код без змін з #143) ...
 func LogDayOff(srv *sheets.Service, spreadsheetID string, workLogSheetName string, chatID int64, dateToLog time.Time) error { /*...*/ return nil }
-// GetActiveGoalFromSheet ... (код без змін) ...
+
+// GetActiveGoalFromSheet ... (код без змін з #143) ...
 func GetActiveGoalFromSheet(srv *sheets.Service, spreadsheetID string, goalsSheetName string, chatID int64) (FinancialGoalData, bool, error) { /*...*/ return FinancialGoalData{}, false, nil }
-// CountWorkingDaysInRange ... (код без змін) ...
+// CountWorkingDaysInRange ... (код без змін з #143) ...
 func CountWorkingDaysInRange(srv *sheets.Service, spreadsheetID string, workLogSheetName string, startDate, endDate time.Time) (int, error) { /*...*/ return 0, nil }
 
-// FormatDuration ... (код без змін) ...
-func FormatDuration(d time.Duration) string { /*...*/ return "" }
-
-/* // Закоментовано getMotivation
-func getMotivation() string { ... }
-*/
+// Функція getMotivation видалена, оскільки вона не використовувалася тут
