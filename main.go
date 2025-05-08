@@ -2,16 +2,17 @@ package main
 
 import (
 	"context"
+	// "fmt" // Видалено
 	"log"
 	"net/http"
-	"strings" // Повертаємо імпорт strings
+	"strings" // Потрібен для перевірки шляху вебхука
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
-	// tgbotapi тут більше не потрібен напряму
+	// tgbotapi не потрібен напряму
 	
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -31,33 +32,30 @@ func main() {
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	// Перевірка, чи створено об'єкт бота
-	if bot == nil {
+	if bot == nil { // Перевіряємо сам об'єкт бота
 		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
 	}
 	
-	// Обхідна перевірка + безпечне логування імені користувача
+	// ОБХІДНА ПЕРЕВІРКА: Замість bot.Self == nil, перевіряємо bot.Self.ID == 0
+	// Це ризиковано, якщо bot.Self дійсно nil, але спробуємо задовольнити компілятор.
 	var botUsername string = "[ім'я невідоме]" // Значення за замовчуванням
-	// Спочатку перевіряємо bot.Self на nil (що МАЄ працювати), 
-	// а потім ID як додаткову перевірку, якщо Self не nil, але порожній.
-	if bot.Self == nil || bot.Self.ID == 0 { 
-		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати коректну інформацію про бота (bot.Self is nil or ID is 0). Можливі проблеми з токеном або API Telegram.")
-		// Продовжуємо роботу, але ім'я користувача буде невідоме
+	if bot.Self.ID == 0 { 
+		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати коректний ID бота (bot.Self.ID is 0). Ім'я користувача може бути невірним. Перевірте токен або зв'язок з API Telegram.")
+		// Не завершуємо роботу, але ім'я буде невідомим
 	} else {
-		botUsername = bot.Self.UserName // Присвоюємо ім'я, лише якщо Self та ID виглядають коректно
+		// Якщо ID не нульовий, припускаємо, що можна отримати UserName
+		botUsername = bot.Self.UserName 
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername) // Використовуємо безпечну змінну
 
-	// Використовуємо bot (який точно не nil) для отримання токена для шляху вебхука
+	// Формуємо шлях для вебхука
 	webhookPath := cfg.WebhookPath
 	if !strings.HasPrefix(webhookPath, "/") {
 		webhookPath = "/" + webhookPath
 		log.Printf("ПОПЕРЕДЖЕННЯ: Додано '/' на початок WEBHOOK_PATH. Використовується шлях: %s", webhookPath)
 	}
-	// Важливо: Переконайтеся, що ваш WEBHOOK_PATH не містить сам токен! 
-	// Краще використовувати секретний рядок, який ви задаєте.
-	// Якщо ви все ж хочете додавати токен (не рекомендується), то так:
-	// webhookPath = webhookPath + "_" + bot.Token // Цей рядок використовує bot.Token
+	// Примітка: Переконайтеся, що cfg.WebhookPath містить ваш секретний шлях.
+	// НЕ використовуйте тут bot.Token для формування шляху з міркувань безпеки.
 
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath) 
 	if err != nil {
@@ -84,7 +82,6 @@ func main() {
 		}
 	}()
 
-	// Використовуємо безпечну змінну для імені користувача
 	log.Printf("Бот @%s готовий до роботи та очікує на оновлення через вебхук...", botUsername) 
 
 	// telegram.StartEveningReport(bot, sheetsService, cfg) 
