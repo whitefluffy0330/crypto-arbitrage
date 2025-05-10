@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"net/http" // Потрібен для http.ListenAndServe
-	"strings"
+	"net/http"
+	"strings" 
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
@@ -23,22 +23,29 @@ func main() {
 	cfg := config.LoadEnv() 
 
 	bot, err := telegram.InitBot(cfg.BotToken) 
-	if err != nil { log.Fatalf("Помилка ініціалізації бота: %v", err) }
-	if bot == nil { log.Fatal("Крит. помилка: InitBot повернув nil bot без помилки.")}
+	if err != nil {
+		log.Fatalf("Помилка ініціалізації бота: %v", err)
+	}
+	// Перевіряємо сам об'єкт бота
+	if bot == nil {
+		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
+	}
 	
-	var botUsername string = "[ім'я невідоме]"; 
-	if bot.Self != nil && bot.Self.ID != 0 { 
+	// ВИПРАВЛЕНО: Повертаємо обхідну перевірку через bot.Self.ID
+	var botUsername string = "[ім'я невідоме]" 
+	// Ми припускаємо, що якщо InitBot не повернув помилку, то bot НЕ nil.
+	// Тепер перевіряємо, чи було поле Self заповнене, дивлячись на ID.
+	if bot.Self.ID == 0 { 
+		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати коректний ID бота (bot.Self.ID is 0). Ім'я користувача буде '[ім'я невідоме]'. Перевірте токен або зв'язок з API Telegram.")
+	} else {
 		botUsername = bot.Self.UserName 
-	} else { 
-		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати інфо про бота (Self or ID is 0).") 
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername) 
 
 	webhookPath := cfg.WebhookPath
 	if !strings.HasPrefix(webhookPath, "/") { webhookPath = "/" + webhookPath }
 
-	// Для SetWebhook, WebhookCertPath може бути порожнім, якщо Nginx обробляє TLS.
-	// Telegram все одно перевірятиме HTTPS доступність WebhookBaseURL + WebhookPath.
+	// WebhookCertPath має бути порожнім, якщо Nginx обробляє TLS
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath) 
 	if err != nil { log.Printf("ПОМИЛКА встановлення вебхука: %v", err) }
 
@@ -51,9 +58,7 @@ func main() {
 
 	go func() {
 		log.Printf("Запуск HTTP сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
-		// ЗМІНЕНО: Використовуємо ListenAndServe замість ListenAndServeTLS
-		// Шляхи cfg.TLSCertPath та cfg.TLSKeyPath тут більше не потрібні
-		err_http := http.ListenAndServe(cfg.WebhookListenAddr, nil) 
+		err_http := http.ListenAndServe(cfg.WebhookListenAddr, nil) // Бот слухає HTTP
 		if err_http != nil {
 			log.Printf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА: %v", err_http) 
 		}
