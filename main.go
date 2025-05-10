@@ -3,15 +3,13 @@ package main
 import (
 	"context"
 	"log"
-	"net/http" // net/http потрібен для ListenAndServeTLS
+	"net/http" // Потрібен для http.ListenAndServe
 	"strings"
 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-
-	// tgbotapi не потрібен напряму
 	
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -24,40 +22,43 @@ func main() {
 	motivation.InitMotivationSeed()
 	cfg := config.LoadEnv() 
 
-	// === Ініціалізація бота (стандартна) ===
 	bot, err := telegram.InitBot(cfg.BotToken) 
-	// Стандартна перевірка помилки
-	if err != nil {
-		log.Fatalf("Помилка ініціалізації бота: %v", err)
+	if err != nil { log.Fatalf("Помилка ініціалізації бота: %v", err) }
+	if bot == nil { log.Fatal("Крит. помилка: InitBot повернув nil bot без помилки.")}
+	
+	var botUsername string = "[ім'я невідоме]"; 
+	if bot.Self != nil && bot.Self.ID != 0 { 
+		botUsername = bot.Self.UserName 
+	} else { 
+		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати інфо про бота (Self or ID is 0).") 
 	}
-	// ВИДАЛЕНО перевірки if bot == nil та if bot.Self.ID == 0. 
-	// Покладаємося, що якщо err == nil, то bot та bot.Self валідні.
-	// Якщо тут виникне паніка nil pointer - проблема в NewBotAPI.
-	log.Printf("Бот @%s ініціалізовано.", bot.Self.UserName) 
-	// === Кінець ініціалізації бота ===
+	log.Printf("Бот @%s ініціалізовано.", botUsername) 
 
-	// Налаштування вебхука
 	webhookPath := cfg.WebhookPath
 	if !strings.HasPrefix(webhookPath, "/") { webhookPath = "/" + webhookPath }
+
+	// Для SetWebhook, WebhookCertPath може бути порожнім, якщо Nginx обробляє TLS.
+	// Telegram все одно перевірятиме HTTPS доступність WebhookBaseURL + WebhookPath.
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath) 
 	if err != nil { log.Printf("ПОМИЛКА встановлення вебхука: %v", err) }
 
-	// Google Sheets
 	ctx := appContext(); credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
 	if err != nil { log.Fatalf("Помилка авторизації Google Sheets: %v", err) }
 	sheetsService, err := gsheets.NewService(ctx, option.WithCredentials(credentials))
 	if err != nil { log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err) }
 
-	// Запуск слухача вебхуків та HTTPS сервера
 	updates := bot.ListenForWebhook(webhookPath) 
+
 	go func() {
-		log.Printf("Запуск HTTPS сервера на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
-		err_https := http.ListenAndServeTLS(cfg.WebhookListenAddr, cfg.TLSCertPath, cfg.TLSKeyPath, nil) 
-		if err_https != nil { log.Printf("КРИТИЧНА ПОМИЛКА HTTPS СЕРВЕРА: %v", err_https) }
+		log.Printf("Запуск HTTP сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
+		// ЗМІНЕНО: Використовуємо ListenAndServe замість ListenAndServeTLS
+		// Шляхи cfg.TLSCertPath та cfg.TLSKeyPath тут більше не потрібні
+		err_http := http.ListenAndServe(cfg.WebhookListenAddr, nil) 
+		if err_http != nil {
+			log.Printf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА: %v", err_http) 
+		}
 	}()
 
-	log.Printf("Бот @%s готовий до роботи...", bot.Self.UserName) // Використовуємо bot.Self.UserName напряму
-
-	// Обробка оновлень
+	log.Printf("Бот @%s готовий до роботи (слухає на %s, очікує запити від Nginx на %s)...", botUsername, cfg.WebhookListenAddr, webhookPath) 
 	telegram.HandleUpdates(updates, bot, sheetsService, cfg) 
 }
