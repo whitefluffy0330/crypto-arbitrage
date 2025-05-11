@@ -9,7 +9,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.comcom/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"   // Для GetFundingRates
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"   // Для GetFundingRates
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko" // Для GetTopMarketCapCoins
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
