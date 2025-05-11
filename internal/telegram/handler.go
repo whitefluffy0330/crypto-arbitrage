@@ -5,7 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
-	"time" // Потрібен для розрахунку тривалості до наступного фінансування
+	"time" // Потрібен для time.Until та time.Now() (використовується неявно)
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
@@ -27,12 +27,17 @@ const (
 // formatDurationToNextFunding форматує тривалість до наступного фінансування
 func formatDurationToNextFunding(d time.Duration) string {
 	if d < 0 {
-		return "вже відбулася"
+		// Якщо час вже минув, можемо показати, що виплата була нещодавно або очікується наступна
+		// Для простоти поки що так:
+		return "вже відбулася" 
 	}
 	
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 
+	if hours == 0 && minutes == 0 { // Якщо тривалість дуже мала (менше хвилини)
+		return "< 1 хв"
+	}
 	if hours > 0 {
 		return fmt.Sprintf("%d год %d хв", hours, minutes)
 	}
@@ -45,15 +50,16 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID; messageID := update.CallbackQuery.Message.MessageID; userName := update.CallbackQuery.From.UserName; callbackData := update.CallbackQuery.Data
 		log.Printf("Callback від [%s](%d): Data=%s, MsgID=%d", userName, chatID, callbackData, messageID); var callbackText string
+		originalMessageText := ""; if update.CallbackQuery.Message != nil { originalMessageText = update.CallbackQuery.Message.Text }
 		switch callbackData {
 		case CallbackConfirmCloseGoal:
 			log.Printf("Підтверджено закриття цілі для %d", chatID); err := DeleteUserGoal(chatID, srv, cfg)
 			if err != nil { if strings.Contains(err.Error(), "не знайдено активної цілі") { callbackText = "ℹ️ Активну ціль не знайдено." } else { callbackText = "⚠️ Помилка закриття цілі."; log.Printf("DeleteUserGoal err: %v", err) } } else { callbackText = "✅ Ціль успішно закрито!" }
-			originalText := ""; if update.CallbackQuery.Message != nil { originalText = update.CallbackQuery.Message.Text }; editText := tgbotapi.NewEditMessageText(chatID, messageID, originalText+"\n\n"+callbackText); bot.Send(editText)
+			editText := tgbotapi.NewEditMessageText(chatID, messageID, originalMessageText+"\n\n"+callbackText); bot.Send(editText)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		case CallbackCancelCloseGoal:
 			log.Printf("Скасовано закриття цілі для %d", chatID); callbackText = "🚫 Закриття цілі скасовано."
-			originalText := ""; if update.CallbackQuery.Message != nil { originalText = update.CallbackQuery.Message.Text }; editText := tgbotapi.NewEditMessageText(chatID, messageID, originalText+"\n\n"+callbackText); bot.Send(editText)
+			editText := tgbotapi.NewEditMessageText(chatID, messageID, originalMessageText+"\n\n"+callbackText); bot.Send(editText)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		default:
 			log.Printf("Передача Callback '%s' в goal.HandleCallback", callbackData); goal.HandleCallback(bot, update.CallbackQuery, srv, cfg)
@@ -67,7 +73,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	log.Printf("[%s] (%d): %s", userName, chatID, msgText)
 	currentState := GetUserState(chatID)
 
-	if currentState == StateAwaitingGoalInput { /* ... (код без змін з #235) ... */ } else if currentState == StateAwaitingInvestmentInput { /* ... (код без змін з #235) ... */ }
+	if currentState == StateAwaitingGoalInput { /* ... (код без змін з #235, переконайтеся, що тут є всі команди у switch) ... */ } else if currentState == StateAwaitingInvestmentInput { /* ... (код без змін з #235, переконайтеся, що тут є всі команди у switch) ... */ }
 	
 	switch msgText {
 	case "/start", "🔁 Старт": commands.StartWork(bot, update.Message, srv, cfg); keyboard.ShowMainKeyboard(bot, chatID) 
@@ -83,43 +89,38 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		sentMsg, _ := bot.Send(loadingMsg)
 		var fundingReportText string
 
-		topCoins, errCoinGecko := coingecko.GetTopMarketCapCoins(20, "usd") // Топ-20
-		if errCoinGecko != nil {
-			log.Printf("Помилка CoinGecko: %v", errCoinGecko); fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати топ-монети: %v", errCoinGecko)
+		topCoins, errCoinGecko := coingecko.GetTopMarketCapCoins(20, "usd") 
+		if errCoinGecko != nil { log.Printf("Помилка CoinGecko: %v", errCoinGecko); fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати топ-монети: %v", errCoinGecko)
 		} else if len(topCoins) == 0 { fundingReportText = "Не знайдено топ-монет на CoinGecko."
 		} else {
-			var targetBinanceSymbols []string
-			for _, coin := range topCoins { targetBinanceSymbols = append(targetBinanceSymbols, strings.ToUpper(coin.Symbol) + "USDT") }
+			var targetBinanceSymbols []string; for _, coin := range topCoins { targetBinanceSymbols = append(targetBinanceSymbols, strings.ToUpper(coin.Symbol) + "USDT") }
 			log.Printf("Сформовано %d цільових символів для Binance: %v", len(targetBinanceSymbols), targetBinanceSymbols)
 
 			allRatesMap, errBinance := binance.GetFundingRates()
 			if errBinance != nil { log.Printf("Помилка Binance: %v", errBinance); fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати ставки Binance: %v", errBinance)
 			} else if len(allRatesMap) == 0 { fundingReportText = "Ставки Binance недоступні."
 			} else {
-				var relevantRatesSlice []binance.FundingInfo
-				for _, s := range targetBinanceSymbols { if r, ok := allRatesMap[s]; ok { relevantRatesSlice = append(relevantRatesSlice, r) } }
+				var relevantRatesSlice []binance.FundingInfo; for _, s := range targetBinanceSymbols { if r, ok := allRatesMap[s]; ok { relevantRatesSlice = append(relevantRatesSlice, r) } }
 				log.Printf("Знайдено %d релевантних ставок Binance.", len(relevantRatesSlice))
 
 				if len(relevantRatesSlice) == 0 { fundingReportText = "Не знайдено ставок фінансування для топ-монет на Binance."
 				} else {
-					sort.SliceStable(relevantRatesSlice, func(i, j int) bool { /* ... (логіка сортування без змін з #233) ... */ 
-						if relevantRatesSlice[i].LastFundingRate > 0 && relevantRatesSlice[j].LastFundingRate <= 0 { return true }; if relevantRatesSlice[i].LastFundingRate <= 0 && relevantRatesSlice[j].LastFundingRate > 0 { return false }; if relevantRatesSlice[i].LastFundingRate > 0 && relevantRatesSlice[j].LastFundingRate > 0 { return relevantRatesSlice[i].LastFundingRate > relevantRatesSlice[j].LastFundingRate }; return relevantRatesSlice[i].LastFundingRate < relevantRatesSlice[j].LastFundingRate
-					})
+					sort.SliceStable(relevantRatesSlice, func(i, j int) bool { if relevantRatesSlice[i].LastFundingRate > 0 && relevantRatesSlice[j].LastFundingRate <= 0 { return true }; if relevantRatesSlice[i].LastFundingRate <= 0 && relevantRatesSlice[j].LastFundingRate > 0 { return false }; if relevantRatesSlice[i].LastFundingRate > 0 && relevantRatesSlice[j].LastFundingRate > 0 { return relevantRatesSlice[i].LastFundingRate > relevantRatesSlice[j].LastFundingRate }; return relevantRatesSlice[i].LastFundingRate < relevantRatesSlice[j].LastFundingRate })
 					
 					var sb strings.Builder
 					sb.WriteString("📊 **Ставки Фінансування (Binance Futures) для Топ-Монет:**\n\n")
 					
-					limit := 7; now := time.Now()
+					limit := 7 
+					// now := time.Now() // <<< ВИДАЛЕНО ЦЕЙ РЯДОК
 
 					sb.WriteString("📈 **Найвищі Позитивні (вигідно Short):**\n")
 					foundPositive := false; positiveCount := 0;
 					for _, info := range relevantRatesSlice {
 						if positiveCount >= limit { break }
-						if info.LastFundingRate > 0.001 { // Невеликий поріг для відображення
-							profitPer100 := 100 * (info.LastFundingRate / 100.0) // info.LastFundingRate - це вже % * 100, тому ділимо на 100
-							                                                   // Якщо LastFundingRate = 0.01 (це 0.01%), то $100 * 0.0001 = $0.01
+						if info.LastFundingRate > 0.001 { 
+							profitPer100 := 100 * (info.LastFundingRate / 100.0) 
 							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv)) // time.Until використовує time.Now() всередині
 							sb.WriteString(fmt.Sprintf("`%s`: Ставка: `%.4f%%`\n  Mark: `%.2f`\n  Наст. виплата: `%s` (через %s)\n  Оцінка для $100 (Short): `+$%.2f`\n\n",
 								info.Symbol, info.LastFundingRate, info.MarkPrice,
 								nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
@@ -134,10 +135,10 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 					for i := len(relevantRatesSlice) - 1; i >= 0; i-- {
 						if negativeCount >= limit { break }
 						info := relevantRatesSlice[i]
-						if info.LastFundingRate < -0.001 { // Невеликий поріг для відображення
-							payoutPer100 := 100 * (-info.LastFundingRate / 100.0) // Беремо позитивне значення
+						if info.LastFundingRate < -0.001 { 
+							payoutPer100 := 100 * (-info.LastFundingRate / 100.0) 
 							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv)) // time.Until використовує time.Now() всередині
 							sb.WriteString(fmt.Sprintf("`%s`: Ставка: `%.4f%%`\n  Mark: `%.2f`\n  Наст. виплата: `%s` (через %s)\n  Оцінка для $100 (Long): `+$%.2f`\n\n",
 								info.Symbol, info.LastFundingRate, info.MarkPrice,
 								nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
@@ -157,5 +158,3 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	default: log.Printf("Не розпізнана команда: [%s]: %s.", userName, msgText); keyboard.ShowMainKeyboard(bot, chatID)
 	}
 }
-
-// Тіла інших функцій (SetUserState, GetUserState, HandleMyGoalCommand, CloseUserGoal, AddInvestment) мають бути повними з попередніх відповідей
