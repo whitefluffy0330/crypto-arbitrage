@@ -125,6 +125,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		currentGoal, exists := GetUserGoal(chatID, srv, cfg) // Передаємо cfg
 		if exists {
 			log.Printf("Знайдено ціль для %d: %+v", chatID, currentGoal)
+			// Для monthNameUkrainian, яка визначена в report.go (в тому ж пакеті telegram)
+			// ми можемо викликати її напряму.
 			goalInfoText := fmt.Sprintf(
 				"📌 Ваша поточна ціль:\n\nСума: `%.2f %s`\n(Ціль на %s %d)\nВстановлено: `%s`\n\nЯкщо бажаєте встановити нову ціль, поточна буде автоматично заархівована (статус зміниться на 'Перевизначено').\nЩоб встановити нову, просто введіть суму (напр. `15000 грн`).",
 				currentGoal.Amount, currentGoal.Currency,
@@ -135,7 +137,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			msg := tgbotapi.NewMessage(chatID, goalInfoText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "view_goal_exists", chatID)
-			// Запитуємо введення нової цілі
 			goal.HandleMyGoalCommand(bot, chatID)
 			SetUserState(chatID, StateAwaitingGoalInput)
 			log.Printf("Стан %d -> awaiting_goal (для оновлення існуючої)", chatID)
@@ -163,7 +164,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		} else {
 			msg := tgbotapi.NewMessage(chatID, "ℹ️ У вас немає активної фінансової цілі для закриття.")
 			sendAndLog(bot, msg, "close_goal_no_active", chatID)
-			keyboard.ShowMainKeyboard(bot, chatID) // Показуємо головну клавіатуру
+			keyboard.ShowMainKeyboard(bot, chatID) 
 		}
 	case "/add_investment":
 		log.Printf("Обробка /add_investment для %d", chatID)
@@ -181,7 +182,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			log.Printf("ПОМИЛКА send loadingMsg /funding: %v", errSendLoad)
 		}
 		var fundingReportText string
-		topCoins, errCoinGecko := coingecko.GetTopMarketCapCoins(20, "usd") // Отримуємо топ-20
+		topCoins, errCoinGecko := coingecko.GetTopMarketCapCoins(20, "usd")
 		if errCoinGecko != nil {
 			log.Printf("Помилка CoinGecko API: %v", errCoinGecko)
 			fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати топ-монети з CoinGecko: %v", errCoinGecko)
@@ -240,7 +241,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 						if posCount >= limit {
 							break
 						}
-						if info.LastFundingRate > 0.0005 { // Невеликий поріг для значущості
+						if info.LastFundingRate > 0.0005 {
 							profitPer100 := 100 * (info.LastFundingRate / 100.0)
 							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
@@ -271,7 +272,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 							break
 						}
 						info := relevantRatesSlice[i]
-						if info.LastFundingRate < -0.0005 { // Невеликий поріг для значущості
+						if info.LastFundingRate < -0.0005 {
 							payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
 							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
@@ -344,33 +345,6 @@ func formatDurationToNextFunding(d time.Duration) string {
 	return fmt.Sprintf("%dг %dхв", hours, minutes)
 }
 
-func monthNameUkrainian(m time.Month) string {
-	switch m {
-	case time.January:
-		return "Січня"
-	case time.February:
-		return "Лютого"
-	case time.March:
-		return "Березня"
-	case time.April:
-		return "Квітня"
-	case time.May:
-		return "Травня"
-	case time.June:
-		return "Червня"
-	case time.July:
-		return "Липня"
-	case time.August:
-		return "Серпня"
-	case time.September:
-		return "Вересня"
-	case time.October:
-		return "Жовтня"
-	case time.November:
-		return "Листопада"
-	case time.December:
-		return "Грудня"
-	default:
-		return ""
-	}
-}
+// Функція monthNameUkrainian ВИДАЛЕНА звідси.
+// Вона має бути визначена у файлі report.go того ж пакету telegram
+// і буде доступна тут напряму завдяки тому, що вони в одному пакеті.
