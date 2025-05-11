@@ -5,7 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
-	"time" // <--- ДОДАНО ІМПОРТ
+	"time" // Імпорт time потрібен для formatDurationToNextFunding та інших операцій з часом у цьому файлі
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
@@ -305,21 +305,15 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	default:
 		// Якщо це не команда і не кнопка, і немає активного стану для введення
 		if !strings.HasPrefix(msgText, "/") && currentState == StateDefault {
-			// Можливо, користувач просто пише щось. Поки що ігноруємо або надсилаємо стандартну відповідь.
-			// msg := tgbotapi.NewMessage(chatID, "Не розпізнано команду. Скористайтеся кнопками меню.")
-			// sendAndLog(bot, msg, "unknown_input", chatID)
-			// keyboard.ShowMainKeyboard(bot, chatID)
 			log.Printf("Не розпізнаний текстовий ввід від [%s] (%d) поза станом: %s", userName, chatID, msgText)
 		} else if strings.HasPrefix(msgText, "/") {
 			log.Printf("Не розпізнана команда: [%s] (%d): %s", userName, chatID, msgText)
-			// msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Команда '%s' не розпізнана.", msgText))
-			// sendAndLog(bot, msg, "unknown_command", chatID)
-			// keyboard.ShowMainKeyboard(bot, chatID)
 		}
 	}
 }
 
 // formatDurationToNextFunding форматує time.Duration у читабельний рядок (наприклад, "1г 30хв")
+// Ця функція залишається тут, оскільки вона використовується в /funding.
 func formatDurationToNextFunding(d time.Duration) string {
 	isPast := false
 	if d < 0 {
@@ -345,34 +339,5 @@ func formatDurationToNextFunding(d time.Duration) string {
 	return fmt.Sprintf("%dг %dхв", hours, minutes)
 }
 
-// monthNameUkrainian повертає українську назву місяця у родовому відмінку (для звіту)
-func monthNameUkrainian(m time.Month) string { // Додано, оскільки використовується в /goal
-	switch m {
-	case time.January:
-		return "Січня"
-	case time.February:
-		return "Лютого"
-	case time.March:
-		return "Березня"
-	case time.April:
-		return "Квітня"
-	case time.May:
-		return "Травня"
-	case time.June:
-		return "Червня"
-	case time.July:
-		return "Липня"
-	case time.August:
-		return "Серпня"
-	case time.September:
-		return "Вересня"
-	case time.October:
-		return "Жовтня"
-	case time.November:
-		return "Листопада"
-	case time.December:
-		return "Грудня"
-	default:
-		return ""
-	}
-}
+// Функцію monthNameUkrainian було ВИДАЛЕНО звідси, щоб уникнути redeclaration.
+// Вона залишається у файлі internal/telegram/report.go
