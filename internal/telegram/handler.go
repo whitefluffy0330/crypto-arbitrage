@@ -5,7 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
-	"time" // Імпорт time потрібен для formatDurationToNextFunding та інших операцій з часом у цьому файлі
+	"time" // Потрібен для time.Until та форматування часу
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
@@ -128,7 +128,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			goalInfoText := fmt.Sprintf(
 				"📌 Ваша поточна ціль:\n\nСума: `%.2f %s`\n(Ціль на %s %d)\nВстановлено: `%s`\n\nЯкщо бажаєте встановити нову ціль, поточна буде автоматично заархівована (статус зміниться на 'Перевизначено').\nЩоб встановити нову, просто введіть суму (напр. `15000 грн`).",
 				currentGoal.Amount, currentGoal.Currency,
-				monthNameUkrainian(currentGoal.SetDate.In(sheets.KyivLocation).Month()), // Використання sheets.KyivLocation
+				monthNameUkrainian(currentGoal.SetDate.In(sheets.KyivLocation).Month()),
 				currentGoal.SetDate.In(sheets.KyivLocation).Year(),
 				currentGoal.SetDate.In(sheets.KyivLocation).Format("02.01.2006"),
 			)
@@ -136,13 +136,13 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "view_goal_exists", chatID)
 			// Запитуємо введення нової цілі
-			goal.HandleMyGoalCommand(bot, chatID)        // Запитуємо нову ціль
-			SetUserState(chatID, StateAwaitingGoalInput) // Встановлюємо стан
+			goal.HandleMyGoalCommand(bot, chatID)
+			SetUserState(chatID, StateAwaitingGoalInput)
 			log.Printf("Стан %d -> awaiting_goal (для оновлення існуючої)", chatID)
 		} else {
 			log.Printf("Активна ціль для %d не знайдена.", chatID)
-			goal.HandleMyGoalCommand(bot, chatID)        // Запитуємо нову ціль
-			SetUserState(chatID, StateAwaitingGoalInput) // Встановлюємо стан
+			goal.HandleMyGoalCommand(bot, chatID)
+			SetUserState(chatID, StateAwaitingGoalInput)
 			log.Printf("Стан %d -> awaiting_goal", chatID)
 		}
 	case "/closegoal", "❌ Закрити ціль":
@@ -152,7 +152,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			confirmationText := fmt.Sprintf(
 				"❓ Ви дійсно хочете закрити поточну ціль?\n\nСума: `%.2f %s`\n(Ціль на %s %d)\nВстановлено: `%s`",
 				currentGoal.Amount, currentGoal.Currency,
-				monthNameUkrainian(currentGoal.SetDate.In(sheets.KyivLocation).Month()), // Використання sheets.KyivLocation
+				monthNameUkrainian(currentGoal.SetDate.In(sheets.KyivLocation).Month()),
 				currentGoal.SetDate.In(sheets.KyivLocation).Year(),
 				currentGoal.SetDate.In(sheets.KyivLocation).Format("02.01.2006"),
 			)
@@ -212,41 +212,47 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 				if len(relevantRatesSlice) == 0 {
 					fundingReportText = "Не знайдено ставок фінансування для топ-монет на Binance Futures."
 				} else {
-					// Сортування: спочатку позитивні (від більшого до меншого), потім негативні (від меншого до більшого по модулю)
 					sort.SliceStable(relevantRatesSlice, func(i, j int) bool {
 						rateI := relevantRatesSlice[i].LastFundingRate
 						rateJ := relevantRatesSlice[j].LastFundingRate
-						// Якщо обидва позитивні, більший перший
 						if rateI > 0 && rateJ > 0 {
 							return rateI > rateJ
 						}
-						// Якщо обидва негативні, менший (більш негативний) перший
 						if rateI < 0 && rateJ < 0 {
 							return rateI < rateJ
 						}
-						// Позитивний перед негативним
 						return rateI > rateJ
 					})
 
 					var sb strings.Builder
 					sb.WriteString("📊 **Funding Rates (Binance Futures) для Топ-Монет (CoinGecko):**\n\n")
-					limit := 7 // Обмеження для позитивних і негативних
+					sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами з Long та Short позиціями, призначені для утримання ціни ф'ючерсного контракту близькою до спотової ціни активу. Розрахунок доходу/витрат на $100 є орієнтовним за один період фінансування і не враховує торгові комісії._\n\n")
+
+					limit := 7
 					posCount := 0
 					negCount := 0
 
-					// Позитивні ставки
-					sb.WriteString("📈 **Найвищі Позитивні (вигідно Short):**\n")
+					sb.WriteString("📈 **Найвищі Позитивні Ставки (Long платить Short):**\n")
+					sb.WriteString("_Для цих пар власники Short-позицій отримують ставку від власників Long-позицій._\n")
+					sb.WriteString("------------------------------\n")
 					foundPos := false
 					for _, info := range relevantRatesSlice {
 						if posCount >= limit {
 							break
 						}
 						if info.LastFundingRate > 0.0005 { // Невеликий поріг для значущості
-							profitPer100 := 100 * (info.LastFundingRate / 100.0) // funding rate вже у відсотках від Binance, але Binance дає як десяткове число
+							profitPer100 := 100 * (info.LastFundingRate / 100.0)
 							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv)) // ВИКОРИСТАННЯ ФУНКЦІЇ
-							sb.WriteString(fmt.Sprintf("`%s`: `%.4f%%` (+$%.2f на $100) (Наст: %s, через %s)\n",
-								info.Symbol, info.LastFundingRate, profitPer100, nextTimeKyiv.Format("15:04 (02.01)"), durationToNext))
+							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+							sb.WriteString(fmt.Sprintf(
+								"`%s` (Mark: `$%.2f`)\n"+
+									"  Ставка: `+%.4f%%`\n"+
+									"  Дохід на $100 Short: `+$%.2f`\n"+
+									"  Наступна: `%s` (через %s)\n",
+								info.Symbol, info.MarkPrice, info.LastFundingRate, profitPer100,
+								nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
+							))
+							sb.WriteString("------------------------------\n")
 							posCount++
 							foundPos = true
 						}
@@ -256,21 +262,28 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 					}
 					sb.WriteString("\n")
 
-					// Негативні ставки
-					sb.WriteString("📉 **Найбільш Негативні (вигідно Long):**\n")
+					sb.WriteString("📉 **Найбільш Негативні Ставки (Short платить Long):**\n")
+					sb.WriteString("_Для цих пар власники Long-позицій отримують ставку від власників Short-позицій._\n")
+					sb.WriteString("------------------------------\n")
 					foundNeg := false
-					// Ітеруємо з кінця відсортованого масиву для негативних
 					for i := len(relevantRatesSlice) - 1; i >= 0; i-- {
 						if negCount >= limit {
 							break
 						}
 						info := relevantRatesSlice[i]
 						if info.LastFundingRate < -0.0005 { // Невеликий поріг для значущості
-							payoutPer100 := 100 * (-info.LastFundingRate / 100.0) // funding rate вже у відсотках
+							payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
 							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv)) // ВИКОРИСТАННЯ ФУНКЦІЇ
-							sb.WriteString(fmt.Sprintf("`%s`: `%.4f%%` (+$%.2f на $100) (Наст: %s, через %s)\n",
-								info.Symbol, info.LastFundingRate, payoutPer100, nextTimeKyiv.Format("15:04 (02.01)"), durationToNext))
+							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+							sb.WriteString(fmt.Sprintf(
+								"`%s` (Mark: `$%.2f`)\n"+
+									"  Ставка: `%.4f%%`\n"+
+									"  Дохід на $100 Long: `+$%.2f`\n"+
+									"  Наступна: `%s` (через %s)\n",
+								info.Symbol, info.MarkPrice, info.LastFundingRate, payoutPer100,
+								nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
+							))
+							sb.WriteString("------------------------------\n")
 							negCount++
 							foundNeg = true
 						}
@@ -292,18 +305,16 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			finalMsg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, finalMsg, "funding_report_new", chatID)
 		}
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо головну клавіатуру
+		keyboard.ShowMainKeyboard(bot, chatID)
 
 	case "/motivation":
 		motivationText := motivation.GetRandomMotivation()
 		msg := tgbotapi.NewMessage(chatID, motivationText)
 		sendAndLog(bot, msg, "motivation", chatID)
-		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо головну клавіатуру
+		keyboard.ShowMainKeyboard(bot, chatID)
 	case "/report", "📊 Прогрес":
-		ReportProgress(bot, update.Message, srv, cfg) // Передаємо cfg
-		// ReportProgress сам покаже клавіатуру або відповідне повідомлення
+		ReportProgress(bot, update.Message, srv, cfg)
 	default:
-		// Якщо це не команда і не кнопка, і немає активного стану для введення
 		if !strings.HasPrefix(msgText, "/") && currentState == StateDefault {
 			log.Printf("Не розпізнаний текстовий ввід від [%s] (%d) поза станом: %s", userName, chatID, msgText)
 		} else if strings.HasPrefix(msgText, "/") {
@@ -312,32 +323,54 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 }
 
-// formatDurationToNextFunding форматує time.Duration у читабельний рядок (наприклад, "1г 30хв")
-// Ця функція залишається тут, оскільки вона використовується в /funding.
 func formatDurationToNextFunding(d time.Duration) string {
 	isPast := false
 	if d < 0 {
-		d = -d // Робимо тривалість позитивною для розрахунку
+		d = -d
 		isPast = true
 	}
-
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
-
 	if hours == 0 && minutes == 0 {
-		// Якщо тривалість дуже мала (менше хвилини), показуємо секунди
 		seconds := int(d.Seconds()) % 60
 		if isPast {
-			return fmt.Sprintf("-%dс", seconds)
+			return "0с (минув)"
 		}
 		return fmt.Sprintf("%dс", seconds)
 	}
-
 	if isPast {
-		return fmt.Sprintf("-%dг %dхв", hours, minutes)
+		return fmt.Sprintf("-%dг %dхв (минув)", hours, minutes)
 	}
 	return fmt.Sprintf("%dг %dхв", hours, minutes)
 }
 
-// Функцію monthNameUkrainian було ВИДАЛЕНО звідси, щоб уникнути redeclaration.
-// Вона залишається у файлі internal/telegram/report.go
+func monthNameUkrainian(m time.Month) string {
+	switch m {
+	case time.January:
+		return "Січня"
+	case time.February:
+		return "Лютого"
+	case time.March:
+		return "Березня"
+	case time.April:
+		return "Квітня"
+	case time.May:
+		return "Травня"
+	case time.June:
+		return "Червня"
+	case time.July:
+		return "Липня"
+	case time.August:
+		return "Серпня"
+	case time.September:
+		return "Вересня"
+	case time.October:
+		return "Жовтня"
+	case time.November:
+		return "Листопада"
+	case time.December:
+		return "Грудня"
+	default:
+		return ""
+	}
+}
