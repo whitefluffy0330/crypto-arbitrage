@@ -1,12 +1,12 @@
 package mexc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io" 
+	"io"
 	"log"
 	"net/http"
-	// "strconv" 
 	"strings"
 	"sync"
 	"time"
@@ -17,9 +17,9 @@ import (
 const (
 	mexcAPIEndpointBase   = "https://contract.mexc.com/api/v1/contract"
 	allContractsPath    = "/detail"
-	fundingRatePath     = "/funding_rate/" 
-	fairPricePath       = "/fair_price/"   
-	maxConcurrentRequests = 10               
+	fundingRatePath     = "/funding_rate/"
+	fairPricePath       = "/fair_price/"
+	maxConcurrentRequests = 10
 )
 
 type MEXCContractDetail struct {
@@ -51,13 +51,13 @@ type MEXCFairPriceInfo struct {
 
 type MEXCAPIResponseWrapper struct {
 	Success bool            `json:"success,omitempty"`
-	Code    int             `json:"code,omitempty"` 
+	Code    int             `json:"code,omitempty"`
 	Msg     string          `json:"msg,omitempty"`
-	Data    json.RawMessage `json:"data"` 
+	Data    json.RawMessage `json:"data"`
 }
 
-
-func fetchMEXCAndUnmarshalData(url string, target interface{}) error {
+// fetchMEXCAndUnmarshalData для ендпоінтів, які повертають ОДИН об'єкт (можливо, в "data")
+func fetchMEXCSingleObjectData(url string, target interface{}) error {
 	client := http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -76,23 +76,29 @@ func fetchMEXCAndUnmarshalData(url string, target interface{}) error {
 	}
 
 	var wrapper MEXCAPIResponseWrapper
-	if err := json.Unmarshal(bodyBytes, &wrapper); err != nil {
-		if errDirect := json.Unmarshal(bodyBytes, target); errDirect != nil {
-			return fmt.Errorf("декодування прямої відповіді від %s: %w (після невдалої спроби обгортки: %v)", url, errDirect, err)
+	errUnmarshalWrapper := json.Unmarshal(bodyBytes, &wrapper)
+
+	if errUnmarshalWrapper == nil && (wrapper.Code == 200 || wrapper.Code == 0 || wrapper.Success) {
+		if len(wrapper.Data) > 0 && string(wrapper.Data) != "null" {
+			if err := json.Unmarshal(wrapper.Data, target); err != nil {
+				return fmt.Errorf("декодування поля 'data' (%s) від %s: %w. Raw 'data': %s", string(wrapper.Data), url, err, string(wrapper.Data))
+			}
+			return nil
 		}
-		return nil
+		// Якщо 'data' порожнє, але код успішний, можливо, відповідь - це сама обгортка (малоймовірно для даних)
+		// або просто немає даних. Спробуємо розпарсити тіло як target, якщо target - це *MEXCAPIResponseWrapper
+		if errDirect := json.Unmarshal(bodyBytes, target); errDirect == nil {
+			// log.Printf("MEXC: Успішний прямий парсинг обгортки (без data) для %s", url)
+			return nil
+		}
+		// log.Printf("MEXC: Поле 'data' порожнє в обгортці для %s, але запит успішний. Target не заповнено з 'data'.", url)
+		return nil // Даних немає, але не помилка API
 	}
 
-	if !wrapper.Success && wrapper.Code != 200 && wrapper.Code != 0 {
-		return fmt.Errorf("API MEXC (%s) повернуло помилку: %s (код %d)", url, wrapper.Msg, wrapper.Code)
-	}
-
-	if len(wrapper.Data) == 0 || string(wrapper.Data) == "null" {
-		return nil 
-	}
-
-	if err := json.Unmarshal(wrapper.Data, target); err != nil {
-		return fmt.Errorf("декодування поля 'data' (%s) від %s: %w. Raw 'data': %s", wrapper.Data, url, err, string(wrapper.Data))
+	// Якщо не розпарсилося як обгортка, або код помилки, спробуємо розпарсити напряму
+	if errDirect := json.Unmarshal(bodyBytes, target); errDirect != nil {
+		log.Printf("MEXC: Помилка прямого декодування відповіді від %s: %v. Сира відповідь: %s", url, errDirect, string(bodyBytes))
+		return fmt.Errorf("декодування прямої відповіді від %s: %w (також не вдалося розпарсити як обгортку: %v)", url, errDirect, errUnmarshalWrapper)
 	}
 	return nil
 }
@@ -100,13 +106,9 @@ func fetchMEXCAndUnmarshalData(url string, target interface{}) error {
 func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	log.Println("MEXC: Початок отримання даних про ставки фінансування...")
 
-	// var allContractsData struct { // ВИДАЛЕНО НЕВИКОРИСТОВУВАНУ ЗМІННУ
-	// 	Data []MEXCContractDetail `json:"data"`
-	// }
-	var allContractsDirect []MEXCContractDetail
-
+	var allContracts []MEXCContractDetail // Очікуємо зріз контрактів
 	contractsURL := mexcAPIEndpointBase + allContractsPath
-	
+
 	client := http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(contractsURL)
 	if err != nil {
@@ -119,45 +121,45 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 		log.Printf("MEXC: Помилка статусу при отриманні списку інструментів (%s): %s", contractsURL, resp.Status)
 		return nil, fmt.Errorf("статус %d від %s", resp.StatusCode, contractsURL)
 	}
-	
-	// Припускаємо, що /detail повертає об'єкт з полем "data", яке містить масив
-	var detailResponse struct {
-		Data []MEXCContractDetail `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&detailResponse); err != nil {
-		// Якщо це не спрацювало, можливо, відповідь - це просто масив
-		// Повернемо тіло для повторного читання і спробуємо розпарсити як масив
-		// (Це потребує читання тіла в байти спочатку, потім передачі bytes.NewReader)
-		// Поки що спрощуємо і очікуємо обгортку або прямий масив, оброблений fetchMEXCAndUnmarshalData
-		// АБО для /detail, який має стабільну структуру, можна зробити прямий парсинг.
-		// Згідно документації, /detail повертає {"success":true,"code":0,"data":[...]}
-		// Тому fetchMEXCAndUnmarshalData має спрацювати, якщо target для нього буде *[]MEXCContractDetail
-		// АЛЕ, ми вже розпарсили його вище, тому використовуємо allContractsDirect
-		// Переробимо цей блок, щоб він був послідовним
-		// Перезавантажимо тіло відповіді, якщо це потрібно, або просто використаємо fetchMEXCAndUnmarshalData
-		// Я повернуся до прямого декодування для /detail, як було спочатку, але з перевіркою
-		// Якщо документація каже, що /detail ПОВИНЕН мати обгортку, то так і робимо.
-		// Якщо у відповіді #277 було `json: cannot unmarshal object into Go value of type []mexc.MEXCContractDetail`
-		// це означає, що відповідь НЕ БУЛА масивом, а була об'єктом.
-		// Отже, використовуємо fetchMEXCAndUnmarshalData
-		if errFetch := fetchMEXCAndUnmarshalData(contractsURL, &allContractsDirect); errFetch != nil {
-			log.Printf("MEXC: Помилка отримання/декодування списку інструментів з fetchMEXCAndUnmarshalData: %v", errFetch)
-			return nil, fmt.Errorf("отримання/декодування інструментів MEXC з fetchMEXCAndUnmarshalData: %w", errFetch)
-		}
-	} else {
-		allContractsDirect = detailResponse.Data
+
+	// Ендпоінт /detail для MEXC повертає об'єкт {"success":true, "code":0, "data":[...]}
+	// Тому ми маємо розпарсити цю обгортку, а потім поле "data".
+	var detailWrapper struct {
+		Success bool                 `json:"success"`
+		Code    int                  `json:"code"`
+		Data    []MEXCContractDetail `json:"data"`
 	}
 
-	log.Printf("MEXC: Отримано %d контрактів.", len(allContractsDirect))
+	if err := json.NewDecoder(resp.Body).Decode(&detailWrapper); err != nil {
+		// Якщо не вдалося, спробуємо прочитати тіло ще раз для логування, якщо можливо
+		// (resp.Body вже прочитано, тому це не спрацює без збереження bodyBytes)
+		log.Printf("MEXC: Помилка декодування обгортки списку інструментів: %v", err)
+		// Спробуємо прочитати тіло знову для логування, якщо це можливо (може не спрацювати)
+		// Прочитаємо тіло ще раз для логування, якщо можливо
+		// Для цього потрібно було б зберегти bodyBytes раніше.
+		// Оскільки resp.Body вже прочитано, ми не можемо його прочитати знову тут просто так.
+		// Краще буде перевірити логи з попереднього запуску, де була сира відповідь.
+		// Але якщо ми дісталися сюди, значить відповідь не була ні [] ни {"data":[]}.
+		return nil, fmt.Errorf("декодування обгортки інструментів MEXC: %w", err)
+	}
+
+	if !detailWrapper.Success && detailWrapper.Code != 0 && detailWrapper.Code != 200 {
+		log.Printf("MEXC: API /detail повернуло помилку: code %d", detailWrapper.Code)
+		return nil, fmt.Errorf("API MEXC /detail повернуло помилку: code %d", detailWrapper.Code)
+	}
+	allContracts = detailWrapper.Data
+	
+	log.Printf("MEXC: Отримано %d контрактів.", len(allContracts))
 
 	var usdtSwapSymbols []string
-	for _, contract := range allContractsDirect {
+	for _, contract := range allContracts {
 		if contract.State == "SHOWING" && contract.SettleCoin == "USDT" && strings.HasSuffix(contract.Symbol, "_USDT") {
 			usdtSwapSymbols = append(usdtSwapSymbols, contract.Symbol)
 		}
 	}
-	log.Printf("MEXC: Знайдено %d активних USDT-SWAP контрактів.", len(usdtSwapSymbols))
+	log.Printf("MEXC: Знайдено %d активних USDT_SWAP контрактів.", len(usdtSwapSymbols))
 	if len(usdtSwapSymbols) == 0 {
+		log.Println("MEXC: Не знайдено активних USDT_SWAP контрактів для обробки.")
 		return []exchanges.UnifiedFundingRateInfo{}, nil
 	}
 
@@ -176,22 +178,26 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 
 			var fairPriceInfo MEXCFairPriceInfo
 			fairPriceURL := mexcAPIEndpointBase + fairPricePath + s
-			if err := fetchMEXCAndUnmarshalData(fairPriceURL, &fairPriceInfo); err != nil {
+			if err := fetchMEXCSingleObjectData(fairPriceURL, &fairPriceInfo); err != nil {
+				// log.Printf("MEXC: Помилка отримання fair_price для %s: %v", s, err) // Закоментовано, щоб зменшити спам у логах
 				return
 			}
-			if fairPriceInfo.Symbol == "" {
+			if fairPriceInfo.Symbol == "" { 
+				// log.Printf("MEXC: Не знайдено даних fair_price для %s", s)
 				return
 			}
 
 			var fundingRateInfo MEXCFundingRateInfo
 			fundingRateURL := mexcAPIEndpointBase + fundingRatePath + s
-			if err := fetchMEXCAndUnmarshalData(fundingRateURL, &fundingRateInfo); err != nil {
+			if err := fetchMEXCSingleObjectData(fundingRateURL, &fundingRateInfo); err != nil {
+				// log.Printf("MEXC: Помилка отримання funding_rate для %s: %v", s, err)
 				return
 			}
-			 if fundingRateInfo.Symbol == "" {
+			if fundingRateInfo.Symbol == "" {
+                // log.Printf("MEXC: Не знайдено даних funding_rate для %s", s)
                 return
             }
-
+			
 			fundingRatePercent := fundingRateInfo.FundingRate * 100 
 			nextFundingTime := time.Unix(0, fundingRateInfo.NextFundingTime*int64(time.Millisecond)).UTC()
 			
