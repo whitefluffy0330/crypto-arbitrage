@@ -215,7 +215,7 @@ func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *g
 	log.Println("Зупинено обробку оновлень Telegram.")
 }
 
-// SetWebhook: Виправлено присвоєння для wh
+// SetWebhook: ВИПРАВЛЕНО для обробки двох значень, що повертаються, ЯКЩО це так у вашій версії бібліотеки
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
 	log.Printf("Встановлення вебхука: URL=%s%s, CertFile (якщо є)=%s", webhookBaseURL, webhookPath, certFilePath)
 	fullWebhookURL := webhookBaseURL + webhookPath
@@ -223,20 +223,27 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 		log.Printf("ПОПЕРЕДЖЕННЯ: URL вебхука '%s' не починається з https://.", fullWebhookURL)
 	}
 
-	var wh tgbotapi.WebhookConfig // Оголошуємо змінну типу WebhookConfig
+	var wh tgbotapi.WebhookConfig
+	var errWebhookSetup error // Змінна для можливої помилки від NewWebhook...
 
 	if certFilePath != "" {
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
-		// NewWebhookWithCert повертає WebhookConfig, тому присвоєння коректне
-		wh = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
+		// Припускаємо, що ці функції можуть повертати (WebhookConfig, error)
+		wh, errWebhookSetup = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
 	} else {
 		log.Printf("Спроба встановити вебхук без файлу сертифіката.")
-		// NewWebhook повертає WebhookConfig, тому присвоєння коректне
-		wh = tgbotapi.NewWebhook(fullWebhookURL)
+		wh, errWebhookSetup = tgbotapi.NewWebhook(fullWebhookURL)
 	}
 
+	if errWebhookSetup != nil {
+		// Якщо NewWebhook... повернуло помилку, обробляємо її
+		log.Printf("ПОМИЛКА конфігурації вебхука при виклику NewWebhook...: %v", errWebhookSetup)
+		return fmt.Errorf("помилка конфігурації вебхука NewWebhook...: %w", errWebhookSetup)
+	}
+
+
 	wh.MaxConnections = 40
-	_, err := bot.Request(wh) // Надсилаємо запит
+	_, err := bot.Request(wh) 
 	if err != nil {
 		log.Printf("ПОМИЛКА встановлення вебхука '%s': %v", fullWebhookURL, err)
 		return fmt.Errorf("bot.Request(webhook setup) failed: %w", err)
@@ -264,8 +271,6 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 
 func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	log.Println("Спроба видалення вебхука...")
-	// DeleteWebhookConfig{} є типом, а не функцією, що повертає значення.
-	// bot.Request очікує параметр типу Chattable, яким є DeleteWebhookConfig.
 	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
 		log.Printf("ПОМИЛКА видалення вебхука: %v", err)
