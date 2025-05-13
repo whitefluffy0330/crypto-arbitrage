@@ -10,11 +10,11 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" // Для UnifiedFundingRateInfo
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" 
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/mexc" // ДОДАНО ІМПОРТ MEXC
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/mexc"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
@@ -25,7 +25,7 @@ import (
 const (
 	CallbackConfirmCloseGoal = "confirm_close_goal"
 	CallbackCancelCloseGoal  = "cancel_close_goal"
-	MaxTelegramMessageSize   = 4096 
+	MaxTelegramMessageSize   = 4096
 )
 
 func sendAndLog(bot *tgbotapi.BotAPI, c tgbotapi.Chattable, commandName string, chatID int64) {
@@ -39,13 +39,195 @@ func requestAndLog(bot *tgbotapi.BotAPI, c tgbotapi.CallbackConfig, commandName 
 	}
 }
 
+// handleFundingExchangeSelection обробляє вибір біржі для фандингу
+func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery, chatID int64, exchangeName, exchangeCallbackPrefix string) {
+	log.Printf("Обробка запиту фандингу для біржі: %s (ChatID: %d)", exchangeName, chatID)
+
+	// Відповідаємо на callback, щоб кнопка перестала "крутитися"
+	answerCallback := tgbotapi.NewCallback(query.ID, fmt.Sprintf("Завантажую ставки з %s...", exchangeName))
+	requestAndLog(bot, answerCallback, "funding_exchange_ack", chatID)
+
+	// Надсилаємо або редагуємо повідомлення про завантаження
+	loadingMsgText := fmt.Sprintf("⏳ Завантажую ставки з %s...", exchangeName)
+	var sentMsg tgbotapi.Message // Для збереження об'єкта надісланого повідомлення, щоб потім редагувати
+	
+	// Якщо це перше повідомлення після вибору, надсилаємо нове.
+	// Якщо це редагування (наприклад, після помилки), то query.Message буде не nil.
+	// Але для простоти поки що завжди надсилаємо нове повідомлення,
+	// а попереднє з кнопками можна було б видалити або відредагувати його текст.
+	// Найпростіше - відредагувати те повідомлення, на якому були кнопки.
+	
+	editMsg := tgbotapi.NewEditMessageText(chatID, query.Message.MessageID, loadingMsgText)
+	editMsg.ReplyMarkup = nil // Видаляємо inline-клавіатуру
+	if _, err := bot.Send(editMsg); err != nil {
+		log.Printf("Помилка редагування повідомлення для завантаження %s: %v", exchangeName, err)
+		// Якщо редагування не вдалося, спробуємо надіслати нове
+		newMsg := tgbotapi.NewMessage(chatID, loadingMsgText)
+		var errSend error
+		sentMsg, errSend = bot.Send(newMsg)
+		if errSend != nil {
+			log.Printf("Помилка надсилання нового повідомлення для завантаження %s: %v", exchangeName, errSend)
+			return
+		}
+	} else {
+		// Успішно відредагували, sentMsg не потрібен, бо ми редагували query.Message
+		// Для подальшого редагування нам потрібен ID цього повідомлення
+		sentMsg = *query.Message // Приблизно, нам потрібен об'єкт Message
+		sentMsg.MessageID = query.Message.MessageID
+	}
+
+
+	var rates []exchanges.UnifiedFundingRateInfo
+	var err error
+
+	switch exchangeCallbackPrefix {
+	case keyboard.CallbackFundingBinance:
+		rates, err = binance.GetFundingRates()
+	case keyboard.CallbackFundingBybit:
+		rates, err = bybit.GetFundingRates()
+	case keyboard.CallbackFundingOKX:
+		rates, err = okx.GetFundingRates()
+	case keyboard.CallbackFundingMEXC:
+		rates, err = mexc.GetFundingRates()
+	default:
+		log.Printf("Невідомий callback для фандингу: %s", exchangeCallbackPrefix)
+		errorText := fmt.Sprintf("Помилка: невідома біржа для запиту (%s).", exchangeName)
+		if sentMsg.MessageID != 0 {
+			finalEditMsg := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, errorText)
+			sendAndLog(bot, finalEditMsg, "funding_unknown_exchange_edit", chatID)
+		} else {
+			newErrorMsg := tgbotapi.NewMessage(chatID, errorText)
+			sendAndLog(bot, newErrorMsg, "funding_unknown_exchange_new", chatID)
+		}
+		return
+	}
+
+	currentFundingThreshold := GetUserFundingThreshold(chatID)
+	var reportText string
+
+	if err != nil {
+		log.Printf("Помилка отримання даних з %s для /funding: %v", exchangeName, err)
+		reportText = fmt.Sprintf("⚠️ %s: не вдалося завантажити дані.\nПомилка: %v", exchangeName, err)
+	} else if len(rates) == 0 {
+		reportText = fmt.Sprintf("ℹ️ %s: дані про ставки фінансування порожні або не знайдено відповідних пар (поріг: `%.4f%%`).", exchangeName, currentFundingThreshold)
+	} else {
+		sort.SliceStable(rates, func(i, j int) bool {
+			rateI := rates[i].LastFundingRate
+			rateJ := rates[j].LastFundingRate
+			if rateI > 0 && rateJ > 0 { return rateI > rateJ }
+			if rateI < 0 && rateJ < 0 { return rateI < rateJ }
+			return rateI > rateJ
+		})
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📊 **Funding Rates (%s):**\n", exchangeName))
+		sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
+		sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n")
+
+		limit := 7 // Можна зробити більший ліміт, бо це для однієї біржі
+		posCount := 0
+		negCount := 0
+
+		sb.WriteString("📈 **Найвищі Позитивні Ставки (Long платить Short):**\n")
+		sb.WriteString("_Для цих пар власники Short-позицій отримують ставку..._\n")
+		sb.WriteString("------------------------------\n"); foundPos := false
+		for _, info := range rates {
+			if posCount >= limit { break }
+			if info.LastFundingRate > currentFundingThreshold {
+				profitPer100 := 100 * (info.LastFundingRate / 100.0)
+				nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
+				durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+				sb.WriteString(fmt.Sprintf(
+					"`%s` (Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Прогноз доходу на $100 Short до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
+					info.Symbol, info.MarkPrice, info.LastFundingRate, profitPer100,
+					nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
+				)); sb.WriteString("------------------------------\n"); posCount++; foundPos = true
+			}
+		}
+		if !foundPos { sb.WriteString(fmt.Sprintf("_Немає позитивних ставок вище `%.4f%%`._\n", currentFundingThreshold)) }
+		sb.WriteString("\n")
+
+		sb.WriteString("📉 **Найбільш Негативні Ставки (Short платить Long):**\n")
+		sb.WriteString("_Для цих пар власники Long-позицій отримують ставку..._\n")
+		sb.WriteString("------------------------------\n"); foundNeg := false
+		
+		tempNegRates := []exchanges.UnifiedFundingRateInfo{}
+		for _, info := range rates {
+			if info.LastFundingRate < -currentFundingThreshold {
+				tempNegRates = append(tempNegRates, info)
+			}
+		}
+		sort.SliceStable(tempNegRates, func(i, j int) bool {
+			return tempNegRates[i].LastFundingRate < tempNegRates[j].LastFundingRate
+		})
+
+		for _, info := range tempNegRates {
+			if negCount >= limit { break }
+				payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
+				nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
+				durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+				sb.WriteString(fmt.Sprintf(
+					"`%s` (Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Прогноз доходу на $100 Long до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
+					info.Symbol, info.MarkPrice, info.LastFundingRate, payoutPer100,
+					nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
+				)); sb.WriteString("------------------------------\n"); negCount++; foundNeg = true
+		}
+		if !foundNeg { sb.WriteString(fmt.Sprintf("_Немає негативних ставок нижче `-%.4f%%`._\n", currentFundingThreshold)) }
+		reportText = sb.String()
+	}
+	
+	// Редагуємо повідомлення "Завантажую..." або надсилаємо нове, якщо перше редагування не вдалося
+	var finalMessageText = reportText
+	if len(finalMessageText) > MaxTelegramMessageSize {
+		log.Printf("Повідомлення для фандингу %s занадто довге (%d). Обрізаємо.", exchangeName, len(finalMessageText))
+		finalMessageText = finalMessageText[:MaxTelegramMessageSize-30] + "\n... (повідомлення обрізано)"
+	}
+
+	// Використовуємо messageID з query.Message.MessageID для редагування
+	finalEditMsg := tgbotapi.NewEditMessageText(chatID, query.Message.MessageID, finalMessageText)
+	finalEditMsg.ParseMode = tgbotapi.ModeMarkdown
+	finalEditMsg.ReplyMarkup = nil // Переконуємося, що клавіатура видалена
+	if _, err := bot.Send(finalEditMsg); err != nil {
+		log.Printf("Помилка фінального редагування повідомлення для %s: %v. Спроба надіслати нове.", exchangeName, err)
+		// Якщо редагування не вдалося (наприклад, повідомлення застаріло), надсилаємо нове
+		newFinalMsg := tgbotapi.NewMessage(chatID, finalMessageText)
+		newFinalMsg.ParseMode = tgbotapi.ModeMarkdown
+		sendAndLog(bot, newFinalMsg, "funding_report_new_after_edit_fail", chatID)
+	}
+
+	// Після показу результатів для однієї біржі, можна знову показати головну клавіатуру,
+	// або inline-клавіатуру для вибору іншої біржі, або нічого (залежить від бажаного UX)
+	// Поки що покажемо головну ReplyKeyboard
+	keyboard.ShowMainKeyboard(bot, chatID)
+}
+
+
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
-		messageID := update.CallbackQuery.Message.MessageID
+		// messageID := update.CallbackQuery.Message.MessageID // Вже не потрібен тут напряму
 		userName := update.CallbackQuery.From.UserName
 		callbackData := update.CallbackQuery.Data
-		log.Printf("Callback від [%s](%d): Data=%s, MsgID=%d", userName, chatID, callbackData, messageID)
+		log.Printf("Callback від [%s](%d): Data=%s, MsgID=%d", userName, chatID, update.CallbackQuery.Message.MessageID)
+		
+		// Обробка callback-ів від кнопок вибору біржі для фандингу
+		switch callbackData {
+		case keyboard.CallbackFundingBinance:
+			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "Binance", keyboard.CallbackFundingBinance)
+			return // Завершуємо обробку callback
+		case keyboard.CallbackFundingBybit:
+			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "Bybit", keyboard.CallbackFundingBybit)
+			return
+		case keyboard.CallbackFundingOKX:
+			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "OKX", keyboard.CallbackFundingOKX)
+			return
+		case keyboard.CallbackFundingMEXC:
+			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "MEXC", keyboard.CallbackFundingMEXC)
+			return
+		// Додайте сюди інші біржі
+		}
+
+		// Обробка інших callback-ів (наприклад, закриття цілі)
 		var callbackResponseText string
 		originalMessageText := ""
 		if update.CallbackQuery.Message != nil {
@@ -65,23 +247,23 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			} else {
 				callbackResponseText = "✅ Ціль успішно закрито!"
 			}
-			editText := tgbotapi.NewEditMessageText(chatID, messageID, originalMessageText+"\n\n"+callbackResponseText)
+			editText := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, originalMessageText+"\n\n"+callbackResponseText)
 			editText.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, editText, "confirm_close_goal_edit", chatID)
-			keyboard.ShowMainKeyboard(bot, chatID)
+			keyboard.ShowMainKeyboard(bot, chatID) // Можливо, варто прибрати, якщо handleFundingExchangeSelection теж її показує
 		case CallbackCancelCloseGoal:
 			log.Printf("Скасовано закриття цілі для %d", chatID)
 			callbackResponseText = "🚫 Закриття цілі скасовано."
-			editText := tgbotapi.NewEditMessageText(chatID, messageID, originalMessageText+"\n\n"+callbackResponseText)
+			editText := tgbotapi.NewEditMessageText(chatID, update.CallbackQuery.Message.MessageID, originalMessageText+"\n\n"+callbackResponseText)
 			editText.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, editText, "cancel_close_goal_edit", chatID)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		default:
-			log.Printf("Передача Callback '%s' в goal.HandleCallback", callbackData)
-			goal.HandleCallback(bot, update.CallbackQuery, srv, cfg)
+			log.Printf("Передача Callback '%s' в goal.HandleCallback або невідомий callback", callbackData)
+			goal.HandleCallback(bot, update.CallbackQuery, srv, cfg) // Може бути потрібно перевірити, чи це callback для цілей
 		}
 		answerCallbackCfg := tgbotapi.NewCallback(update.CallbackQuery.ID, callbackResponseText)
-		requestAndLog(bot, answerCallbackCfg, "answer_callback", chatID)
+		requestAndLog(bot, answerCallbackCfg, "answer_callback_other", chatID)
 		return
 	}
 
@@ -96,6 +278,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	log.Printf("Поточний стан для ChatID %d: '%s'", chatID, currentState)
 
 	switch currentState {
+	// ... (обробка станів StateAwaiting... без змін) ...
 	case StateAwaitingGoalInput:
 		HandleGoalInput(bot, update.Message, srv, cfg)
 		SetUserState(chatID, StateDefault)
@@ -132,6 +315,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 
 	if strings.HasPrefix(msgText, "/set_funding_threshold") {
+		// ... (логіка команди /set_funding_threshold без змін) ...
 		log.Printf("Обробка команди /set_funding_threshold для ChatID %d.", chatID)
 		parts := strings.Fields(msgText)
 		if len(parts) == 2 {
@@ -168,12 +352,13 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 
 	switch msgText {
+	// ... (кейси для /start, /stop, /dayoff, /goal, /closegoal, /add_investment, BtnSetFundingThreshold без змін) ...
 	case keyboard.BtnWorkStart, "/start":
 		commands.StartWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case keyboard.BtnWorkStop, "/stop":
 		commands.StopWork(bot, update.Message, srv, cfg)
-		keyboard.ShowMainKeyboard(bot, chatID)
+		keyboard.ShowMainKeyboard(bot, chatID) // Мотивація тепер тут
 	case keyboard.BtnWorkDayOff, "/dayoff":
 		commands.DayOff(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
@@ -241,167 +426,33 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		sendAndLog(bot, msg, "spreads_wip", chatID)
 		keyboard.ShowMainKeyboard(bot, chatID)
 
-	case keyboard.BtnFundingRates, "/funding":
-		log.Printf("Обробка команди /funding для ChatID: %d", chatID)
-		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки з ваших бірж (Binance, Bybit, OKX, MEXC)...") // Оновлено
-		sentMsgObj, errSendLoad := bot.Send(loadingMsg)
-		if errSendLoad != nil {
-			log.Printf("ПОМИЛКА send loadingMsg /funding: %v", errSendLoad)
-		}
-
-		currentFundingThreshold := GetUserFundingThreshold(chatID)
-		log.Printf("Використовується поріг фандингу для ChatID %d: %.4f%%", chatID, currentFundingThreshold)
-
-		var allFundingRates []exchanges.UnifiedFundingRateInfo
-		var errorsText []string
-
-		// --- Binance ---
-		binanceRates, errBinance := binance.GetFundingRates()
-		if errBinance != nil {
-			log.Printf("Помилка отримання даних з Binance для /funding: %v", errBinance)
-			errorsText = append(errorsText, "⚠️ Binance: не вдалося завантажити дані.")
-		} else {
-			allFundingRates = append(allFundingRates, binanceRates...)
-			log.Printf("Отримано %d ставок з Binance", len(binanceRates))
-		}
+	case keyboard.BtnFundingRates, "/funding": // Змінена логіка для /funding
+		log.Printf("Обробка команди /funding для ChatID: %d. Надсилання запиту вибору біржі.", chatID)
+		currentFundingThreshold := GetUserFundingThreshold(chatID) // Отримуємо поріг для відображення
 		
-		// --- Bybit ---
-		bybitRates, errBybit := bybit.GetFundingRates()
-		if errBybit != nil {
-			log.Printf("Помилка отримання даних з Bybit для /funding: %v", errBybit)
-			errorsText = append(errorsText, "⚠️ Bybit: не вдалося завантажити дані.")
-		} else {
-			allFundingRates = append(allFundingRates, bybitRates...)
-			log.Printf("Отримано %d ставок з Bybit", len(bybitRates))
-		}
+		introText := "📊 **Funding Rates**\n"
+		introText += fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold)
+		introText += "_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n"
+		introText += "Оберіть біржу для перегляду ставок:"
 
-		// --- OKX ---
-		okxRates, errOKX := okx.GetFundingRates()
-		if errOKX != nil {
-			log.Printf("Помилка отримання даних з OKX для /funding: %v", errOKX)
-			errorsText = append(errorsText, "⚠️ OKX: не вдалося завантажити дані.")
-		} else {
-			allFundingRates = append(allFundingRates, okxRates...)
-			log.Printf("Отримано %d ставок з OKX", len(okxRates))
-		}
+		msg := tgbotapi.NewMessage(chatID, introText)
+		msg.ParseMode = tgbotapi.ModeMarkdown
+		msg.ReplyMarkup = keyboard.CreateFundingExchangeSelectionKeyboard() // Надсилаємо inline-клавіатуру
+		sendAndLog(bot, msg, "funding_exchange_select_prompt", chatID)
+		// Не показуємо головну клавіатуру тут, бо очікуємо відповідь на inline-кнопку
 
-		// --- MEXC ---
-		mexcRates, errMEXC := mexc.GetFundingRates()
-		if errMEXC != nil {
-			log.Printf("Помилка отримання даних з MEXC для /funding: %v", errMEXC)
-			errorsText = append(errorsText, "⚠️ MEXC: не вдалося завантажити дані.")
-		} else {
-			allFundingRates = append(allFundingRates, mexcRates...)
-			log.Printf("Отримано %d ставок з MEXC", len(mexcRates))
-		}
-		
-		// --- Тут буде отримання даних з Bitget, Crypto.com, Gate.io ---
-
-		var fundingReportText string
-		if len(allFundingRates) == 0 && len(errorsText) > 0 {
-			fundingReportText = strings.Join(errorsText, "\n")
-		} else if len(allFundingRates) == 0 {
-			fundingReportText = "Не вдалося отримати дані про ставки фінансування з налаштованих бірж або дані порожні."
-		} else {
-			sort.SliceStable(allFundingRates, func(i, j int) bool {
-				rateI := allFundingRates[i].LastFundingRate
-				rateJ := allFundingRates[j].LastFundingRate
-				if rateI > 0 && rateJ > 0 { return rateI > rateJ } 
-				if rateI < 0 && rateJ < 0 { return rateI < rateJ } 
-				return rateI > rateJ 
-			})
-
-			var sb strings.Builder
-			sb.WriteString("📊 **Funding Rates (Binance, Bybit, OKX, MEXC):**\n") // Оновлено заголовок
-			sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
-			sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n")
-
-			limit := 5 
-			posCount := 0
-			negCount := 0
-
-			sb.WriteString("📈 **Найвищі Позитивні Ставки (Long платить Short):**\n")
-			sb.WriteString("_Для цих пар власники Short-позицій отримують ставку..._\n")
-			sb.WriteString("------------------------------\n"); foundPos := false
-			for _, info := range allFundingRates {
-				if posCount >= limit { break }
-				if info.LastFundingRate > currentFundingThreshold {
-					profitPer100 := 100 * (info.LastFundingRate / 100.0) 
-					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
-					sb.WriteString(fmt.Sprintf(
-						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Прогноз доходу на $100 Short до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
-						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, profitPer100,
-						nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
-					)); sb.WriteString("------------------------------\n"); posCount++; foundPos = true
-				}
-			}
-			if !foundPos { sb.WriteString(fmt.Sprintf("_Немає позитивних ставок вище `%.4f%%`._\n", currentFundingThreshold)) }
-			sb.WriteString("\n")
-
-			sb.WriteString("📉 **Найбільш Негативні Ставки (Short платить Long):**\n")
-			sb.WriteString("_Для цих пар власники Long-позицій отримують ставку..._\n")
-			sb.WriteString("------------------------------\n"); foundNeg := false
-			
-			tempNegRates := []exchanges.UnifiedFundingRateInfo{}
-			for _, info := range allFundingRates {
-				if info.LastFundingRate < -currentFundingThreshold {
-					tempNegRates = append(tempNegRates, info)
-				}
-			}
-			sort.SliceStable(tempNegRates, func(i, j int) bool {
-				return tempNegRates[i].LastFundingRate < tempNegRates[j].LastFundingRate
-			})
-
-			for _, info := range tempNegRates {
-				if negCount >= limit { break }
-					payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
-					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
-					sb.WriteString(fmt.Sprintf(
-						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Прогноз доходу на $100 Long до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
-						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, payoutPer100,
-						nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
-					)); sb.WriteString("------------------------------\n"); negCount++; foundNeg = true
-			}
-
-			if !foundNeg { sb.WriteString(fmt.Sprintf("_Немає негативних ставок нижче `-%.4f%%`._\n", currentFundingThreshold)) }
-			
-			if len(errorsText) > 0 {
-				sb.WriteString("\n\n" + strings.Join(errorsText, "\n"))
-			}
-			fundingReportText = sb.String()
-		}
-
-		if sentMsgObj.MessageID != 0 && errSendLoad == nil {
-			editText := tgbotapi.NewEditMessageText(chatID, sentMsgObj.MessageID, fundingReportText)
-			editText.ParseMode = tgbotapi.ModeMarkdown
-			if len(editText.Text) > MaxTelegramMessageSize { 
-				log.Printf("ПОМИЛКА: Відредаговане повідомлення для funding_report_edit занадто довге (%d символів). Обрізаємо.", len(editText.Text))
-				editText.Text = editText.Text[:MaxTelegramMessageSize-20] + "\n... (повідомлення обрізано)" 
-			}
-
-			if _, err := bot.Send(editText); err != nil { 
-				if strings.Contains(err.Error(), "MESSAGE_TOO_LONG") {
-					log.Printf("ПОМИЛКА надсилання (funding_report_edit) для %d: %v. Повідомлення занадто довге.", chatID, err)
-					errorText := "Помилка: звіт по фандингу занадто довгий. Спробуйте вищий поріг /set_funding_threshold."
-					finalMsg := tgbotapi.NewMessage(chatID, errorText)
-					sendAndLog(bot, finalMsg, "funding_report_too_long_error", chatID)
-				} else {
-					log.Printf("ПОМИЛКА надсилання (funding_report_edit) для %d: %v", chatID, err)
-				}
-			}
-
-		} else { 
-			finalMsg := tgbotapi.NewMessage(chatID, fundingReportText)
-			finalMsg.ParseMode = tgbotapi.ModeMarkdown
-			if len(finalMsg.Text) > MaxTelegramMessageSize { 
-				log.Printf("ПОМИЛКА: Нове повідомлення для funding_report_new занадто довге (%d символів). Обрізаємо.", len(finalMsg.Text))
-				finalMsg.Text = finalMsg.Text[:MaxTelegramMessageSize-20] + "\n... (повідомлення обрізано)" 
-			}
-			sendAndLog(bot, finalMsg, "funding_report_new", chatID) 
-		}
+	case "/motivation": // Залишаємо текстову команду, якщо потрібна
+		log.Printf("Обробка '/motivation' для ChatID %d", chatID)
+		// Переконайтеся, що пакет motivation імпортовано, якщо він використовується
+		// import "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
+		// motivationText := motivation.GetRandomMotivation()
+		// msg := tgbotapi.NewMessage(chatID, motivationText)
+		// sendAndLog(bot, msg, "motivation_cmd", chatID)
+		// Наразі просто заглушка, якщо мотивація видалена
+		msg := tgbotapi.NewMessage(chatID, "Функція мотивації зараз інтегрована після завершення робочого дня.")
+		sendAndLog(bot, msg, "motivation_info", chatID)
 		keyboard.ShowMainKeyboard(bot, chatID)
+
 
 	case keyboard.BtnProgress, "/report":
 		ReportProgress(bot, update.Message, srv, cfg)
