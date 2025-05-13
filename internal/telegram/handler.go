@@ -10,15 +10,13 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	// Імпортуємо пакет exchanges для UnifiedFundingRateInfo
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" // Для UnifiedFundingRateInfo
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko" // БІЛЬШЕ НЕ ВИКОРИСТОВУЄТЬСЯ для /funding
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" // ДОДАНО ІМПОРТ BYBIT
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Якщо мотивація не використовується
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
@@ -242,7 +240,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnFundingRates, "/funding":
 		log.Printf("Обробка команди /funding для ChatID: %d", chatID)
-		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки з бірж...") // Змінено повідомлення
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки з ваших бірж (Binance, Bybit)...")
 		sentMsgObj, errSendLoad := bot.Send(loadingMsg)
 		if errSendLoad != nil {
 			log.Printf("ПОМИЛКА send loadingMsg /funding: %v", errSendLoad)
@@ -252,38 +250,47 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		log.Printf("Використовується поріг фандингу для ChatID %d: %.4f%%", chatID, currentFundingThreshold)
 
 		var allFundingRates []exchanges.UnifiedFundingRateInfo // Збираємо дані з усіх бірж сюди
+		var errorsText []string // Збираємо помилки з різних бірж
 
 		// --- Отримуємо дані з Binance ---
-		// Надалі тут буде цикл по ваших налаштованих біржах
 		binanceRates, errBinance := binance.GetFundingRates()
 		if errBinance != nil {
 			log.Printf("Помилка отримання даних з Binance для /funding: %v", errBinance)
-			// Можна додати повідомлення користувачу про помилку з конкретною біржею
+			errorsText = append(errorsText, "⚠️ Binance: не вдалося завантажити дані.")
 		} else {
 			allFundingRates = append(allFundingRates, binanceRates...)
 			log.Printf("Отримано %d ставок з Binance", len(binanceRates))
 		}
 		
-		// --- Тут буде отримання даних з Bybit, OKX і т.д. ---
-		// bybitRates, errBybit := bybit.GetFundingRates()
-		// if errBybit != nil { ... } else { allFundingRates = append(allFundingRates, bybitRates...) }
+		// --- Отримуємо дані з Bybit ---
+		bybitRates, errBybit := bybit.GetFundingRates()
+		if errBybit != nil {
+			log.Printf("Помилка отримання даних з Bybit для /funding: %v", errBybit)
+			errorsText = append(errorsText, "⚠️ Bybit: не вдалося завантажити дані.")
+		} else {
+			allFundingRates = append(allFundingRates, bybitRates...)
+			log.Printf("Отримано %d ставок з Bybit", len(bybitRates))
+		}
+		
+		// --- Тут буде отримання даних з OKX, MEXC і т.д. ---
 
 
 		var fundingReportText string
-		if len(allFundingRates) == 0 {
+		if len(allFundingRates) == 0 && len(errorsText) > 0 {
+			fundingReportText = strings.Join(errorsText, "\n")
+		} else if len(allFundingRates) == 0 {
 			fundingReportText = "Не вдалося отримати дані про ставки фінансування з налаштованих бірж або дані порожні."
 		} else {
-			// Сортування всіх отриманих ставок
 			sort.SliceStable(allFundingRates, func(i, j int) bool {
 				rateI := allFundingRates[i].LastFundingRate
 				rateJ := allFundingRates[j].LastFundingRate
-				if rateI > 0 && rateJ > 0 { return rateI > rateJ } // Позитивні: більший спочатку
-				if rateI < 0 && rateJ < 0 { return rateI < rateJ } // Негативні: більш негативний спочатку (менший за значенням)
-				return rateI > rateJ // Позитивні перед негативними
+				if rateI > 0 && rateJ > 0 { return rateI > rateJ } 
+				if rateI < 0 && rateJ < 0 { return rateI < rateJ } 
+				return rateI > rateJ 
 			})
 
 			var sb strings.Builder
-			sb.WriteString("📊 **Funding Rates (Ваші Біржі):**\n") // Оновлений заголовок
+			sb.WriteString("📊 **Funding Rates (Binance, Bybit):**\n") 
 			sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
 			sb.WriteString("_Ставки фінансування – це періодичні платежі... Розрахунок... не враховує торгові комісії._\n\n")
 
@@ -297,7 +304,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			for _, info := range allFundingRates {
 				if posCount >= limit { break }
 				if info.LastFundingRate > currentFundingThreshold {
-					profitPer100 := 100 * (info.LastFundingRate / 100.0)
+					profitPer100 := 100 * (info.LastFundingRate / 100.0) 
 					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
 					sb.WriteString(fmt.Sprintf(
@@ -313,27 +320,19 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			sb.WriteString("📉 **Найбільш Негативні Ставки (Short платить Long):**\n")
 			sb.WriteString("_Для цих пар власники Long-позицій отримують ставку..._\n")
 			sb.WriteString("------------------------------\n"); foundNeg := false
-			// Для негативних ставок, нам потрібні ті, що найближче до 0 з негативного боку, або найбільш негативні
-			// Поточне сортування ставить найбільш негативні (найменші значення) в кінець списку, якщо rateI < rateJ для негативних.
-			// Щоб взяти "найбільш негативні", ми можемо ітерувати з кінця відфільтрованого по негативних.
-			// Або ж змінити логіку сортування для негативних, щоб вони йшли від найменш негативної (-0.0001) до найбільш (-0.1).
-			// Поки що, ітеруємо з кінця масиву (де мають бути найбільш негативні ставки після поточного сортування)
+			
 			tempNegRates := []exchanges.UnifiedFundingRateInfo{}
 			for _, info := range allFundingRates {
 				if info.LastFundingRate < -currentFundingThreshold {
 					tempNegRates = append(tempNegRates, info)
 				}
 			}
-			// Сортуємо тільки негативні ставки від найбільш негативної до найменш негативної
 			sort.SliceStable(tempNegRates, func(i, j int) bool {
 				return tempNegRates[i].LastFundingRate < tempNegRates[j].LastFundingRate
 			})
 
-
 			for _, info := range tempNegRates {
 				if negCount >= limit { break }
-				// Перевірка вже зроблена при формуванні tempNegRates
-				// if info.LastFundingRate < -currentFundingThreshold {
 					payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
 					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
@@ -342,11 +341,14 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, payoutPer100,
 						nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
 					)); sb.WriteString("------------------------------\n"); negCount++; foundNeg = true
-				// }
 			}
 
-
 			if !foundNeg { sb.WriteString(fmt.Sprintf("_Немає негативних ставок нижче `-%.4f%%`._\n", currentFundingThreshold)) }
+			
+			// Додаємо повідомлення про помилки, якщо вони були
+			if len(errorsText) > 0 {
+				sb.WriteString("\n\n" + strings.Join(errorsText, "\n"))
+			}
 			fundingReportText = sb.String()
 		}
 
