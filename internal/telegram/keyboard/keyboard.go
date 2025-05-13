@@ -5,7 +5,6 @@ import (
 	"log"
 )
 
-// Константи для текстів кнопок
 const (
 	BtnMyGoal              = "🎯 Моя ціль"
 	BtnProgress            = "📊 Прогрес"
@@ -16,10 +15,18 @@ const (
 	BtnCloseGoal           = "❌ Закрити ціль"
 	BtnAddInvestment       = "➕ Додати Інвестицію"
 	BtnSetFundingThreshold = "⚙️ Поріг Funding"
-	BtnSpreads             = "📈 Спреди" // Нова кнопка для спредів
+	BtnSpreads             = "📈 Спреди"
 )
 
-// ShowMainKeyboard показує головну клавіатуру користувачу
+// Константи для CallbackData кнопок вибору біржі для фандингу
+const (
+	CallbackFundingBinance = "funding_binance"
+	CallbackFundingBybit   = "funding_bybit"
+	CallbackFundingOKX     = "funding_okx"
+	CallbackFundingMEXC    = "funding_mexc"
+	// Додамо сюди інші біржі, коли вони будуть реалізовані
+)
+
 func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
@@ -37,7 +44,7 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 			tgbotapi.NewKeyboardButton(BtnAddInvestment),
 			tgbotapi.NewKeyboardButton(BtnSetFundingThreshold),
 		),
-		tgbotapi.NewKeyboardButtonRow( // Новий рядок для кнопки Спредів
+		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnSpreads),
 		),
 	)
@@ -50,7 +57,6 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 }
 
-// CreateConfirmationKeyboard створює inline-клавіатуру "Так/Ні"
 func CreateConfirmationKeyboard(yesCallbackData, noCallbackData string) tgbotapi.InlineKeyboardMarkup {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -59,4 +65,37 @@ func CreateConfirmationKeyboard(yesCallbackData, noCallbackData string) tgbotapi
 		),
 	)
 	return keyboard
+}
+
+// CreateFundingExchangeSelectionKeyboard створює inline-клавіатуру для вибору біржі для фандингу
+func CreateFundingExchangeSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
+	// Список підтримуваних бірж (назви для кнопок та їх callback-дані)
+	// В майбутньому це можна буде генерувати динамічно на основі конфігурації
+	exchanges := []struct {
+		Name         string
+		CallbackData string
+	}{
+		{"Binance", CallbackFundingBinance},
+		{"Bybit", CallbackFundingBybit},
+		{"OKX", CallbackFundingOKX},
+		{"MEXC", CallbackFundingMEXC},
+		// Додайте сюди інші біржі, коли вони будуть готові
+	}
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	var currentRow []tgbotapi.InlineKeyboardButton
+
+	for i, ex := range exchanges {
+		currentRow = append(currentRow, tgbotapi.NewInlineKeyboardButtonData(ex.Name, ex.CallbackData))
+		// Робимо по 2 кнопки в рядку для кращого вигляду
+		if (i+1)%2 == 0 || i == len(exchanges)-1 {
+			rows = append(rows, tgbotapi.NewInlineKeyboardRow(currentRow...))
+			currentRow = []tgbotapi.InlineKeyboardButton{} // Очищаємо для наступного рядка
+		}
+	}
+	// Можна додати кнопку "Скасувати" або "Всі біржі" (з обережністю)
+	// rows = append(rows, tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Скасувати", "funding_cancel")))
+
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
