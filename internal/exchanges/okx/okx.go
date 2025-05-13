@@ -3,124 +3,152 @@ package okx
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"sort" // Потрібен для сортування
 	"strconv"
 	"strings"
-	"sync" // Потрібен для go-рутин та WaitGroup
+	"sync"
 	"time"
 
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" // Для UnifiedFundingRateInfo
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges"
 )
 
 const (
 	okxAPIEndpoint        = "https://www.okx.com"
-	instrumentsPathV5     = "/api/v5/public/instruments"
+	instrumentsPathV5     = "/api/v5/public/instruments" // Можливо, вже не потрібен, якщо /market/tickers дає все
 	fundingRatePathV5     = "/api/v5/public/funding-rate"
 	markPricePathV5       = "/api/v5/public/mark-price"
-	maxConcurrentRequests = 10 // Обмеження одночасних запитів до API OKX
+	tickersPathV5         = "/api/v5/market/tickers"      // Будемо використовувати цей для отримання списку та обсягів
+	maxConcurrentRequests = 5                             // Зменшено для OKX теж
+	maxErrorLogs        = 5
+	topNByVolumeOKX     = 75 // Обмеження для обробки за обсягом
 )
 
-// --- Структури для відповіді API OKX ---
-
-// OKXInstrumentInfo для /api/v5/public/instruments
-type OKXInstrumentInfo struct {
-	InstType  string `json:"instType"`  // SWAP, FUTURES, OPTION, SPOT, MARGIN
-	InstID    string `json:"instId"`    // BTC-USDT-SWAP
-	Uly       string `json:"uly"`       // BTC-USDT (базовий актив)
-	SettleCcy string `json:"settleCcy"` // USDT, BTC (валюта розрахунку)
-	State     string `json:"state"`     // live, suspended, preopen
-}
-
-// OKXMarkPriceInfo для /api/v5/public/mark-price
-type OKXMarkPriceInfo struct {
-	InstType string `json:"instType"`
-	InstID   string `json:"instId"`
-	MarkPx   string `json:"markPx"` // Ціна маркування
-	Ts       string `json:"ts"`     // Час оновлення
-}
-
-// OKXFundingRateInfo для /api/v5/public/funding-rate
-type OKXFundingRateInfo struct {
+type OKXTickerInfo struct { // Для /api/v5/market/tickers
 	InstType      string `json:"instType"`
 	InstID        string `json:"instId"`
-	FundingRate   string `json:"fundingRate"`     // Поточна ставка
-	NextFundingRate string `json:"nextFundingRate"` // Очікувана ставка
-	FundingTime   string `json:"fundingTime"`     // Час наступної виплати (UTC ms)
+	MarkPx        string `json:"markPx"`        // Ціна маркування з тікера (якщо є)
+	FundingRate   string `json:"fundingRate"`   // Ставка фінансування з тікера (якщо є)
+	NextFundingTime string `json:"nextFundingTime"` // Час наступного фінансування з тікера (якщо є)
+	VolCcy24h     string `json:"volCcy24h"`     // Обсяг в котирувальній валюті за 24 години (наприклад, USDT)
+	Vol24h        string `json:"vol24h"`        // Обсяг в базовій валюті за 24 години
+	// ... інші поля з тікера ...
 }
 
-// OKXAPIResponse структура для загальної відповіді API
+type OKXMarkPriceInfoAPI struct { // Для /api/v5/public/mark-price
+	InstType string `json:"instType"`
+	InstID   string `json:"instId"`
+	MarkPx   string `json:"markPx"`
+	Ts       string `json:"ts"`
+}
+
+type OKXFundingRateInfoAPI struct { // Для /api/v5/public/funding-rate
+	InstType      string `json:"instType"`
+	InstID        string `json:"instId"`
+	FundingRate   string `json:"fundingRate"`
+	NextFundingRate string `json:"nextFundingRate"`
+	FundingTime   string `json:"fundingTime"`
+}
+
 type OKXAPIResponse struct {
 	Code string          `json:"code"`
 	Msg  string          `json:"msg"`
-	Data json.RawMessage `json:"data"` // Використовуємо RawMessage для гнучкого парсингу
+	Data json.RawMessage `json:"data"`
 }
 
-// --- Функції для роботи з API ---
-
-// fetchOKXData робить GET-запит та розпаковує відповідь у надану структуру
 func fetchOKXData(url string, target interface{}) error {
-	client := http.Client{Timeout: 15 * time.Second}
+	client := http.Client{Timeout: 20 * time.Second} // Збільшено таймаут
 	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("HTTP GET до %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, errRead := io.ReadAll(resp.Body)
+	if errRead != nil {
+		return fmt.Errorf("читання тіла відповіді від %s: %w", url, errRead)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		// Спробуємо прочитати тіло помилки
-		// bodyBytes, _ := io.ReadAll(resp.Body)
-		// log.Printf("OKX: Тіло відповіді при помилці статусу для %s: %s", url, string(bodyBytes))
+		log.Printf("OKX: Помилка статусу %d від %s. Тіло: %s", resp.StatusCode, url, string(bodyBytes))
 		return fmt.Errorf("статус %d від %s", resp.StatusCode, url)
 	}
 
 	var apiResponse OKXAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		return fmt.Errorf("декодування загальної відповіді від %s: %w", url, err)
+	if err := json.Unmarshal(bodyBytes, &apiResponse); err != nil {
+		// Якщо це не стандартна обгортка, спробуємо розпарсити напряму
+		if errDirect := json.Unmarshal(bodyBytes, target); errDirect != nil {
+			log.Printf("OKX: Помилка декодування відповіді від %s (пряма та обгортка): %v / %v. Сира відповідь: %s", url, errDirect, err, string(bodyBytes))
+			return fmt.Errorf("декодування відповіді від %s: %w (пряма) / %v (обгортка)", url, errDirect, err)
+		}
+		return nil
 	}
 
 	if apiResponse.Code != "0" {
 		return fmt.Errorf("API OKX (%s) повернуло помилку: %s (код %s)", url, apiResponse.Msg, apiResponse.Code)
 	}
 
-	// Розпаковуємо поле "data" у цільову структуру
 	if err := json.Unmarshal(apiResponse.Data, target); err != nil {
-		return fmt.Errorf("декодування поля 'data' від %s: %w", url, err)
+		return fmt.Errorf("декодування поля 'data' від %s: %w. Raw 'data': %s", url, err, string(apiResponse.Data))
 	}
 	return nil
 }
 
-// GetFundingRates отримує ставки фінансування для USDT-M SWAP контрактів з OKX
 func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	log.Println("OKX: Початок отримання даних про ставки фінансування...")
 
-	// 1. Отримати список SWAP інструментів
-	var instruments []OKXInstrumentInfo
-	instrumentsURL := fmt.Sprintf("%s%s?instType=SWAP", okxAPIEndpoint, instrumentsPathV5)
-	if err := fetchOKXData(instrumentsURL, &instruments); err != nil {
-		log.Printf("OKX: Помилка отримання списку інструментів: %v", err)
-		return nil, fmt.Errorf("отримання інструментів OKX: %w", err)
+	// 1. Отримати всі тікери для SWAP, щоб відфільтрувати за обсягом
+	var allTickers []OKXTickerInfo
+	tickersURL := fmt.Sprintf("%s%s?instType=SWAP", okxAPIEndpoint, tickersPathV5)
+	if err := fetchOKXData(tickersURL, &allTickers); err != nil {
+		log.Printf("OKX: Помилка отримання списку тікерів: %v", err)
+		return nil, fmt.Errorf("отримання тікерів OKX: %w", err)
 	}
-	log.Printf("OKX: Отримано %d SWAP інструментів.", len(instruments))
+	log.Printf("OKX: Отримано %d SWAP тікерів.", len(allTickers))
 
-	// Фільтруємо тільки активні USDT-margined SWAP контракти
-	var usdtSwapInstIDs []string
-	for _, inst := range instruments {
-		if inst.State == "live" && inst.SettleCcy == "USDT" && strings.HasSuffix(inst.InstID, "-USDT-SWAP") {
-			usdtSwapInstIDs = append(usdtSwapInstIDs, inst.InstID)
+	// Фільтруємо та сортуємо за обсягом
+	var usdtSwapTickers []OKXTickerInfo
+	for _, ticker := range allTickers {
+		if strings.HasSuffix(ticker.InstID, "-USDT-SWAP") && ticker.VolCcy24h != "" {
+			usdtSwapTickers = append(usdtSwapTickers, ticker)
 		}
 	}
-	log.Printf("OKX: Знайдено %d активних USDT-SWAP інструментів.", len(usdtSwapInstIDs))
-	if len(usdtSwapInstIDs) == 0 {
-		return []exchanges.UnifiedFundingRateInfo{}, nil
+
+	sort.SliceStable(usdtSwapTickers, func(i, j int) bool {
+		volI, _ := strconv.ParseFloat(usdtSwapTickers[i].VolCcy24h, 64)
+		volJ, _ := strconv.ParseFloat(usdtSwapTickers[j].VolCcy24h, 64)
+		return volI > volJ // Сортування за спаданням обсягу
+	})
+
+	var instIDsToProcess []string
+	if len(usdtSwapTickers) > topNByVolumeOKX {
+		log.Printf("OKX: Обмежуємо обробку до топ-%d з %d знайдених USDT-SWAP тікерів за обсягом.", topNByVolumeOKX, len(usdtSwapTickers))
+		for i := 0; i < topNByVolumeOKX; i++ {
+			instIDsToProcess = append(instIDsToProcess, usdtSwapTickers[i].InstID)
+		}
+	} else {
+		log.Printf("OKX: Знайдено %d USDT-SWAP тікерів для обробки (менше або дорівнює ліміту %d).", len(usdtSwapTickers), topNByVolumeOKX)
+		for _, ticker := range usdtSwapTickers {
+			instIDsToProcess = append(instIDsToProcess, ticker.InstID)
+		}
 	}
 
-	// 2. Отримати ціни маркування для всіх SWAP інструментів
-	var markPricesRaw []OKXMarkPriceInfo
+	if len(instIDsToProcess) == 0 {
+		log.Println("OKX: Не знайдено USDT-SWAP інструментів для запиту ставок фандингу після фільтрації за обсягом.")
+		return []exchanges.UnifiedFundingRateInfo{}, nil
+	}
+	log.Printf("OKX: Буде оброблено %d інструментів після фільтрації за обсягом.", len(instIDsToProcess))
+
+
+	// 2. Отримати ціни маркування для всіх SWAP інструментів (або тільки для обраних)
+	// Ефективніше отримати всі одразу, якщо можливо
+	var markPricesRaw []OKXMarkPriceInfoAPI
 	markPriceURL := fmt.Sprintf("%s%s?instType=SWAP", okxAPIEndpoint, markPricePathV5)
 	if err := fetchOKXData(markPriceURL, &markPricesRaw); err != nil {
-		log.Printf("OKX: Помилка отримання цін маркування: %v", err)
-		// Продовжуємо, але ціни маркування можуть бути недоступні
+		log.Printf("OKX: Помилка отримання цін маркування: %v. Продовжуємо без них.", err)
+		// Не повертаємо помилку, спробуємо отримати дані без цін маркування
 	}
 	markPricesMap := make(map[string]float64)
 	for _, mp := range markPricesRaw {
@@ -131,32 +159,46 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	}
 	log.Printf("OKX: Отримано %d цін маркування, %d успішно розпарсено.", len(markPricesRaw), len(markPricesMap))
 
-	// 3. Для кожного USDT-SWAP інструменту отримати ставку фінансування
+
+	// 3. Для кожного обраного інструменту отримати ставку фінансування
 	var fundingData []exchanges.UnifiedFundingRateInfo
 	var wg sync.WaitGroup
-	var mu sync.Mutex // Для безпечного доступу до fundingData з горутин
-	
-	// Створюємо семафор для обмеження кількості одночасних запитів
+	var mu sync.Mutex
 	sem := make(chan struct{}, maxConcurrentRequests)
 
-	for _, instID := range usdtSwapInstIDs {
+	var fundingRateErrorCount int32
+	var fundingRateEmptyCount int32
+	var processedCount int32
+
+
+	for _, instID := range instIDsToProcess {
 		wg.Add(1)
-		sem <- struct{}{} // Захоплюємо слот у семафорі
+		sem <- struct{}{}
 
 		go func(instrumentID string) {
 			defer wg.Done()
-			defer func() { <-sem }() // Звільняємо слот
+			defer func() { <-sem }()
 
-			var fundingRateInfoList []OKXFundingRateInfo // API повертає масив з одного елемента
+			var fundingRateInfoList []OKXFundingRateInfoAPI // API повертає масив з одного елемента
 			fundingRateURL := fmt.Sprintf("%s%s?instId=%s", okxAPIEndpoint, fundingRatePathV5, instrumentID)
 			
 			if err := fetchOKXData(fundingRateURL, &fundingRateInfoList); err != nil {
-				log.Printf("OKX: Помилка отримання ставки фандингу для %s: %v", instrumentID, err)
+				mu.Lock()
+				if fundingRateErrorCount < maxErrorLogs {
+					log.Printf("OKX: Помилка отримання ставки фандингу для %s: %v", instrumentID, err)
+				}
+				fundingRateErrorCount++
+				mu.Unlock()
 				return
 			}
 
 			if len(fundingRateInfoList) == 0 || fundingRateInfoList[0].FundingRate == "" || fundingRateInfoList[0].FundingTime == "" {
-				// log.Printf("OKX: Немає даних фандингу або порожні поля для %s", instrumentID)
+				mu.Lock()
+				if fundingRateEmptyCount < maxErrorLogs {
+					// log.Printf("OKX: Немає даних фандингу або порожні поля для %s", instrumentID)
+				}
+				fundingRateEmptyCount++
+				mu.Unlock()
 				return
 			}
 			
@@ -164,14 +206,13 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 
 			fundingRateRaw, errFR := strconv.ParseFloat(fundingItem.FundingRate, 64)
 			if errFR != nil {
-				log.Printf("OKX: Помилка парсингу FundingRate для %s ('%s'): %v", instrumentID, fundingItem.FundingRate, errFR)
+				// Вже логується у fetchOKXData, якщо парсинг там
 				return
 			}
 			fundingRatePercent := fundingRateRaw * 100
 
 			nextFundingTimeMs, errNFT := strconv.ParseInt(fundingItem.FundingTime, 10, 64)
 			if errNFT != nil {
-				log.Printf("OKX: Помилка парсингу FundingTime для %s ('%s'): %v", instrumentID, fundingItem.FundingTime, errNFT)
 				return
 			}
 			nextFundingTime := time.Unix(0, nextFundingTimeMs*int64(time.Millisecond)).UTC()
@@ -179,8 +220,6 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 			markPrice := 0.0
 			if mp, ok := markPricesMap[instrumentID]; ok {
 				markPrice = mp
-			} else {
-				// log.Printf("OKX: Ціна маркування не знайдена для %s, використовується 0.0", instrumentID)
 			}
 			
 			symbolClean := strings.Replace(instrumentID, "-SWAP", "", 1)
@@ -194,13 +233,17 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 				LastFundingRate: fundingRatePercent,
 				NextFundingTime: nextFundingTime,
 			})
+			processedCount++
 			mu.Unlock()
 
 		}(instID)
 	}
 
-	wg.Wait() // Чекаємо завершення всіх горутин
+	wg.Wait()
 
-	log.Printf("OKX: Успішно оброблено та зібрано дані фінансування для %d USDT SWAP пар.", len(fundingData))
+	log.Printf("OKX: Успішно оброблено та зібрано дані фінансування для %d з %d USDT SWAP пар. Помилок FundingRate: %d (з них порожніх: %d).",
+		processedCount, len(instIDsToProcess), fundingRateErrorCount, fundingRateEmptyCount)
 	return fundingData, nil
 }
+
+// min функція не використовується
