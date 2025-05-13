@@ -3,7 +3,7 @@ package telegram
 import (
 	"fmt"
 	"log"
-	"strings" // Додано для strings.Contains у DeleteUserGoal
+	"strings"
 	"sync"
 	"time"
 
@@ -19,14 +19,13 @@ func init() {
 	loc, err := time.LoadLocation("Europe/Kyiv")
 	if err != nil {
 		log.Printf("Крит. помилка telegram: не вдалося завантажити часову зону 'Europe/Kyiv': %v.", err)
-		KyivLocation = time.UTC // Відкат до UTC у разі помилки
+		KyivLocation = time.UTC
 	} else {
 		KyivLocation = loc
 		log.Println("Часову зону Europe/Kyiv завантажено (telegram).")
 	}
 }
 
-// --- Структури та змінні для стану користувача та цілей ---
 type FinancialGoal struct {
 	Amount       float64
 	Currency     string
@@ -45,23 +44,20 @@ var (
 	userStatesMutex sync.RWMutex
 )
 
-// КОНСТАНТИ СТАНІВ
 const (
 	StateDefault                 = ""
 	StateAwaitingGoalInput       = "awaiting_goal_input"
 	StateAwaitingInvestmentInput = "awaiting_investment_input"
-	StateAwaitingFundingThreshold = "awaiting_funding_threshold" // ДОДАНО НОВИЙ СТАН
+	StateAwaitingFundingThreshold = "awaiting_funding_threshold"
 )
 
-// --- Змінні для порогу фандингу ---
 var (
 	userFundingThresholds      = make(map[int64]float64)
 	userFundingThresholdsMutex sync.RWMutex
 )
 
-const defaultFundingThreshold = 0.0005 // 0.0005%
+const defaultFundingThreshold = 0.0005
 
-// --- Функції для управління станом користувача ---
 func SetUserState(chatID int64, state string) {
 	userStatesMutex.Lock()
 	defer userStatesMutex.Unlock()
@@ -83,7 +79,6 @@ func GetUserState(chatID int64) string {
 	return state
 }
 
-// --- Функції для роботи з цілями ---
 func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg config.Config) error {
 	activeGoal, isActive := GetUserGoal(chatID, srv, cfg)
 	if isActive {
@@ -150,10 +145,10 @@ func DeleteUserGoal(chatID int64, srv *gsheets.Service, cfg config.Config) error
 	log.Printf("Спроба закрити активну ціль для ChatID %d.", chatID)
 	err := sheets.UpdateGoalStatusInSheet(srv, cfg.SpreadsheetID, cfg.SheetNameUserGoals, chatID, "Закрита", time.Now().UTC())
 	if err != nil {
-		if strings.Contains(err.Error(), "не знайдено активної цілі") { // Використання strings.Contains
+		if strings.Contains(err.Error(), "не знайдено активної цілі") {
 			log.Printf("Немає активної цілі в Google Sheets для ChatID %d, щоб позначити як 'Закрита'.", chatID)
 			ClearInMemoryUserGoal(chatID)
-			return nil 
+			return nil
 		}
 		log.Printf("ПОМИЛКА оновлення статусу цілі в Sheets для ChatID %d: %v", chatID, err)
 		ClearInMemoryUserGoal(chatID)
@@ -175,7 +170,6 @@ func ClearInMemoryUserGoal(chatID int64) {
 	}
 }
 
-// --- ДОДАНО: Функції для роботи з порогом фандингу ---
 func SetUserFundingThreshold(chatID int64, threshold float64) {
 	userFundingThresholdsMutex.Lock()
 	defer userFundingThresholdsMutex.Unlock()
@@ -195,7 +189,6 @@ func GetUserFundingThreshold(chatID int64) float64 {
 	return threshold
 }
 
-// --- Основні функції бота ---
 func InitBot(token string) (*tgbotapi.BotAPI, error) {
 	log.Println("Спроба ініціалізації бота через tgbotapi.NewBotAPI...")
 	if token == "" {
@@ -217,27 +210,33 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) {
 func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, cfg config.Config) {
 	log.Println("Розпочато обробку оновлень Telegram...")
 	for update := range updates {
-		HandleUpdate(bot, update, srv, cfg) 
+		HandleUpdate(bot, update, srv, cfg)
 	}
 	log.Println("Зупинено обробку оновлень Telegram.")
 }
 
+// SetWebhook: Виправлено присвоєння для wh
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
 	log.Printf("Встановлення вебхука: URL=%s%s, CertFile (якщо є)=%s", webhookBaseURL, webhookPath, certFilePath)
 	fullWebhookURL := webhookBaseURL + webhookPath
 	if !strings.HasPrefix(fullWebhookURL, "https://") {
 		log.Printf("ПОПЕРЕДЖЕННЯ: URL вебхука '%s' не починається з https://.", fullWebhookURL)
 	}
-	var wh tgbotapi.WebhookConfig
+
+	var wh tgbotapi.WebhookConfig // Оголошуємо змінну типу WebhookConfig
+
 	if certFilePath != "" {
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
+		// NewWebhookWithCert повертає WebhookConfig, тому присвоєння коректне
 		wh = tgbotapi.NewWebhookWithCert(fullWebhookURL, tgbotapi.FilePath(certFilePath))
 	} else {
 		log.Printf("Спроба встановити вебхук без файлу сертифіката.")
+		// NewWebhook повертає WebhookConfig, тому присвоєння коректне
 		wh = tgbotapi.NewWebhook(fullWebhookURL)
 	}
+
 	wh.MaxConnections = 40
-	_, err := bot.Request(wh)
+	_, err := bot.Request(wh) // Надсилаємо запит
 	if err != nil {
 		log.Printf("ПОМИЛКА встановлення вебхука '%s': %v", fullWebhookURL, err)
 		return fmt.Errorf("bot.Request(webhook setup) failed: %w", err)
@@ -265,6 +264,8 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 
 func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	log.Println("Спроба видалення вебхука...")
+	// DeleteWebhookConfig{} є типом, а не функцією, що повертає значення.
+	// bot.Request очікує параметр типу Chattable, яким є DeleteWebhookConfig.
 	_, err := bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
 		log.Printf("ПОМИЛКА видалення вебхука: %v", err)
