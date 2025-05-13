@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv" // Потрібен для strconv.ParseFloat
+	"strconv"
 	"strings"
-	"time" // Потрібен для time.Until та форматування часу
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
@@ -16,7 +16,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Імпорт можна видалити, якщо /motivation теж видаляється
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
@@ -92,7 +92,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	currentState := GetUserState(chatID)
 	log.Printf("Поточний стан для ChatID %d: '%s'", chatID, currentState)
 
-
 	switch currentState {
 	case StateAwaitingGoalInput:
 		HandleGoalInput(bot, update.Message, srv, cfg)
@@ -112,13 +111,13 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "set_funding_threshold_error", chatID)
-		} else if threshold < 0 || threshold > 100 { 
+		} else if threshold < 0 || threshold > 100 {
 			responseText := fmt.Sprintf("⚠️ Поріг `%.4f%%` не є коректним. Введіть значення від 0 до 100.", threshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "set_funding_threshold_range_error", chatID)
 		} else {
-			SetUserFundingThreshold(chatID, threshold) 
+			SetUserFundingThreshold(chatID, threshold)
 			responseText := fmt.Sprintf("✅ Поріг для ставок фінансування встановлено: `%.4f%%`.\nКоманда `/funding` тепер буде показувати ставки вище (або нижче для негативних) цього значення.", threshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
@@ -128,7 +127,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
 	}
-	
+
 	if strings.HasPrefix(msgText, "/set_funding_threshold") {
 		log.Printf("Обробка команди /set_funding_threshold для ChatID %d.", chatID)
 		parts := strings.Fields(msgText)
@@ -147,38 +146,38 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 				sendAndLog(bot, msg, "set_funding_threshold_cmd_range_error", chatID)
 			} else {
 				SetUserFundingThreshold(chatID, threshold)
-				responseText := fmt.Sprintf("✅ Поріг для ставок фінансування встановлено: `%.4f%%`.\nКоманда `/funding` тепер буде показувати ставки вище (або нижче для негативних) цього значення.", threshold)
+				responseText := fmt.Sprintf("✅ Поріг для ставок фінансування встановлено: `%.4f%%`.", threshold)
 				msg := tgbotapi.NewMessage(chatID, responseText)
 				msg.ParseMode = tgbotapi.ModeMarkdown
 				sendAndLog(bot, msg, "set_funding_threshold_cmd_success", chatID)
+				keyboard.ShowMainKeyboard(bot, chatID)
 			}
 		} else {
 			currentThreshold := GetUserFundingThreshold(chatID)
-			responseText := fmt.Sprintf("ℹ️ Поточний поріг для ставок фінансування: `%.4f%%`.\nЩоб встановити новий, введіть команду `/set_funding_threshold ЗНАЧЕННЯ` (наприклад, `/set_funding_threshold 0.01`) або просто надішліть числове значення порогу.", currentThreshold)
+			responseText := fmt.Sprintf("ℹ️ Поточний поріг для ставок фінансування: `%.4f%%`.\nЩоб встановити новий, введіть нове значення (наприклад, `0.01`):", currentThreshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "set_funding_threshold_info", chatID)
-			SetUserState(chatID, StateAwaitingFundingThreshold) 
+			SetUserState(chatID, StateAwaitingFundingThreshold)
 			log.Printf("Стан для ChatID %d -> %s", chatID, StateAwaitingFundingThreshold)
 		}
-		return 
+		return
 	}
 
 	switch msgText {
-	case "/start", "🔁 Старт":
+	case keyboard.BtnWorkStart, "/start":
 		commands.StartWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
-	case "/stop", "⛔️ Стоп":
+	case keyboard.BtnWorkStop, "/stop":
 		commands.StopWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
-	case "/dayoff", "🏖 Вихідний":
+	case keyboard.BtnWorkDayOff, "/dayoff":
 		commands.DayOff(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
-	case "/goal", "🎯 Моя ціль":
-		log.Printf("Обробка /goal для %d", chatID)
+	case keyboard.BtnMyGoal, "/goal":
+		log.Printf("Обробка '%s' для %d", msgText, chatID)
 		currentGoal, exists := GetUserGoal(chatID, srv, cfg)
 		if exists {
-			log.Printf("Знайдено ціль для %d: %+v", chatID, currentGoal)
 			goalInfoText := fmt.Sprintf(
 				"📌 Ваша поточна ціль:\n\nСума: `%.2f %s`\n(Ціль на %s %d)\nВстановлено: `%s`\n\nЯкщо бажаєте встановити нову ціль, поточна буде автоматично заархівована.\nЩоб встановити нову, просто введіть суму (напр. `15000 грн`).",
 				currentGoal.Amount, currentGoal.Currency,
@@ -189,17 +188,14 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			msg := tgbotapi.NewMessage(chatID, goalInfoText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "view_goal_exists", chatID)
-			goal.HandleMyGoalCommand(bot, chatID) 
-			SetUserState(chatID, StateAwaitingGoalInput)
-			log.Printf("Стан %d -> %s (для оновлення існуючої)", chatID, StateAwaitingGoalInput)
-		} else {
-			log.Printf("Активна ціль для %d не знайдена.", chatID)
 			goal.HandleMyGoalCommand(bot, chatID)
 			SetUserState(chatID, StateAwaitingGoalInput)
-			log.Printf("Стан %d -> %s", chatID, StateAwaitingGoalInput)
+		} else {
+			goal.HandleMyGoalCommand(bot, chatID)
+			SetUserState(chatID, StateAwaitingGoalInput)
 		}
-	case "/closegoal", "❌ Закрити ціль":
-		log.Printf("Обробка /closegoal для %d", chatID)
+	case keyboard.BtnCloseGoal, "/closegoal":
+		log.Printf("Обробка '%s' для %d", msgText, chatID)
 		currentGoal, exists := GetUserGoal(chatID, srv, cfg)
 		if exists {
 			confirmationText := fmt.Sprintf(
@@ -218,106 +214,86 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			sendAndLog(bot, msg, "close_goal_no_active", chatID)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		}
-	case "/add_investment":
-		log.Printf("Обробка /add_investment для %d", chatID)
+	case keyboard.BtnAddInvestment, "/add_investment":
+		log.Printf("Обробка '%s' для %d", msgText, chatID)
 		prompt := "➕ Введіть дані про вашу нову інвестицію у форматі:\n`ТИП, НАЗВА/СИМВОЛ, СУМА ВАЛЮТА, ДАТА (РРРР-ММ-ДД)`\n\nНаприклад:\n`Крипто-холд, BTC, 0.5 BTC, 2023-10-25`\n`Акція, META, 1000 USD, 2024-01-15`"
 		msg := tgbotapi.NewMessage(chatID, prompt)
 		msg.ParseMode = tgbotapi.ModeMarkdown
 		sendAndLog(bot, msg, "add_investment_prompt", chatID)
 		SetUserState(chatID, StateAwaitingInvestmentInput)
-		log.Printf("Стан %d -> %s", chatID, StateAwaitingInvestmentInput)
+	case keyboard.BtnSetFundingThreshold: // Обробка кнопки "⚙️ Поріг Funding"
+		log.Printf("Обробка кнопки '%s' для ChatID %d.", keyboard.BtnSetFundingThreshold, chatID)
+		currentThreshold := GetUserFundingThreshold(chatID)
+		responseText := fmt.Sprintf("ℹ️ Поточний поріг для ставок фінансування: `%.4f%%`.\nЩоб встановити новий, введіть нове значення (наприклад, `0.01`):", currentThreshold)
+		msg := tgbotapi.NewMessage(chatID, responseText)
+		msg.ParseMode = tgbotapi.ModeMarkdown
+		sendAndLog(bot, msg, "set_funding_threshold_button_info", chatID)
+		SetUserState(chatID, StateAwaitingFundingThreshold)
+		log.Printf("Стан для ChatID %d -> %s (через кнопку)", chatID, StateAwaitingFundingThreshold)
+	
+	case keyboard.BtnSpreads, "/spreads": // Новий case для кнопки "Спреди" та команди /spreads
+		log.Printf("Обробка '%s' для ChatID %d.", msgText, chatID)
+		responseText := "📈 Функція моніторингу спредів наразі в розробці. Слідкуйте за оновленнями!"
+		msg := tgbotapi.NewMessage(chatID, responseText)
+		sendAndLog(bot, msg, "spreads_wip", chatID)
+		keyboard.ShowMainKeyboard(bot, chatID) // Показуємо головну клавіатуру після інформаційного повідомлення
 
-	case "/funding", "💹 Funding Rates":
-		log.Printf("Обробка команди /funding для ChatID: %d", chatID)
+	case keyboard.BtnFundingRates, "/funding":
+		log.Printf("Обробка '%s' для ChatID: %d", msgText, chatID)
 		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую топ-монети з CoinGecko та ставки з Binance Futures...")
 		sentMsgObj, errSendLoad := bot.Send(loadingMsg)
 		if errSendLoad != nil {
 			log.Printf("ПОМИЛКА send loadingMsg /funding: %v", errSendLoad)
 		}
-
-		currentFundingThreshold := GetUserFundingThreshold(chatID) 
-		log.Printf("Використовується поріг фандингу для ChatID %d: %.4f%%", chatID, currentFundingThreshold)
-
+		currentFundingThreshold := GetUserFundingThreshold(chatID)
 		var fundingReportText string
 		topCoins, errCoinGecko := coingecko.GetTopMarketCapCoins(20, "usd")
 		if errCoinGecko != nil {
-			log.Printf("Помилка CoinGecko API: %v", errCoinGecko)
 			fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати топ-монети з CoinGecko: %v", errCoinGecko)
 		} else if len(topCoins) == 0 {
 			fundingReportText = "Не знайдено топ-монет на CoinGecko."
 		} else {
 			var targetBinanceSymbols []string
-			for _, coin := range topCoins {
-				targetBinanceSymbols = append(targetBinanceSymbols, strings.ToUpper(coin.Symbol)+"USDT")
-			}
-			log.Printf("Сформовано %d цільових символів для Binance: %v", len(targetBinanceSymbols), targetBinanceSymbols)
-
+			for _, coin := range topCoins { targetBinanceSymbols = append(targetBinanceSymbols, strings.ToUpper(coin.Symbol)+"USDT") }
 			allRatesMap, errBinance := binance.GetFundingRates()
 			if errBinance != nil {
-				log.Printf("Помилка Binance API: %v", errBinance)
 				fundingReportText = fmt.Sprintf("⚠️ Не вдалося отримати ставки фінансування з Binance: %v", errBinance)
 			} else if len(allRatesMap) == 0 {
 				fundingReportText = "Дані про ставки фінансування з Binance недоступні або порожні."
 			} else {
 				var relevantRatesSlice []binance.FundingInfo
-				for _, symbol := range targetBinanceSymbols {
-					if rateInfo, ok := allRatesMap[symbol]; ok {
-						relevantRatesSlice = append(relevantRatesSlice, rateInfo)
-					}
-				}
-				log.Printf("Знайдено %d релевантних ставок фінансування на Binance.", len(relevantRatesSlice))
-
+				for _, symbol := range targetBinanceSymbols { if rateInfo, ok := allRatesMap[symbol]; ok { relevantRatesSlice = append(relevantRatesSlice, rateInfo) } }
 				if len(relevantRatesSlice) == 0 {
 					fundingReportText = "Не знайдено ставок фінансування для топ-монет на Binance Futures."
 				} else {
 					sort.SliceStable(relevantRatesSlice, func(i, j int) bool {
-						rateI := relevantRatesSlice[i].LastFundingRate
-						rateJ := relevantRatesSlice[j].LastFundingRate
+						rateI := relevantRatesSlice[i].LastFundingRate; rateJ := relevantRatesSlice[j].LastFundingRate
 						if rateI > 0 && rateJ > 0 { return rateI > rateJ }
 						if rateI < 0 && rateJ < 0 { return rateI < rateJ }
 						return rateI > rateJ
 					})
-
 					var sb strings.Builder
 					sb.WriteString("📊 **Funding Rates (Binance Futures) для Топ-Монет (CoinGecko):**\n")
 					sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
-					sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами... Розрахунок... не враховує торгові комісії._\n\n")
-
+					sb.WriteString("_Ставки фінансування – це періодичні платежі... Розрахунок... не враховує торгові комісії._\n\n")
 					limit := 7; posCount := 0; negCount := 0
-					sb.WriteString("📈 **Найвищі Позитивні Ставки (Long платить Short):**\n")
-					sb.WriteString("_Для цих пар власники Short-позицій отримують ставку..._\n")
-					sb.WriteString("------------------------------\n"); foundPos := false
+					sb.WriteString("📈 **Найвищі Позитивні Ставки (Long платить Short):**\n_Для цих пар власники Short-позицій отримують ставку..._\n------------------------------\n"); foundPos := false
 					for _, info := range relevantRatesSlice {
 						if posCount >= limit { break }
 						if info.LastFundingRate > currentFundingThreshold {
-							profitPer100 := 100 * (info.LastFundingRate / 100.0)
-							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
-							sb.WriteString(fmt.Sprintf(
-								"`%s` (Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Дохід на $100 Short: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
-								info.Symbol, info.MarkPrice, info.LastFundingRate, profitPer100,
-								nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
-							)); sb.WriteString("------------------------------\n"); posCount++; foundPos = true
+							profitPer100 := 100 * (info.LastFundingRate / 100.0); nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation); durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+							sb.WriteString(fmt.Sprintf("`%s` (Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Дохід на $100 Short: `+$%.2f`\n  Наступна: `%s` (через %s)\n", info.Symbol, info.MarkPrice, info.LastFundingRate, profitPer100, nextTimeKyiv.Format("15:04 (02.01)"), durationToNext)); sb.WriteString("------------------------------\n"); posCount++; foundPos = true
 						}
 					}
 					if !foundPos { sb.WriteString(fmt.Sprintf("_Немає позитивних ставок вище `%.4f%%`._\n", currentFundingThreshold)) }
 					sb.WriteString("\n")
-
-					sb.WriteString("📉 **Найбільш Негативні Ставки (Short платить Long):**\n")
-					sb.WriteString("_Для цих пар власники Long-позицій отримують ставку..._\n")
-					sb.WriteString("------------------------------\n"); foundNeg := false
+					sb.WriteString("📉 **Найбільш Негативні Ставки (Short платить Long):**\n_Для цих пар власники Long-позицій отримують ставку..._\n------------------------------\n"); foundNeg := false
 					for i := len(relevantRatesSlice) - 1; i >= 0; i-- {
 						if negCount >= limit { break }
 						info := relevantRatesSlice[i]
 						if info.LastFundingRate < -currentFundingThreshold {
-							payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
-							nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
-							durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
-							sb.WriteString(fmt.Sprintf(
-								"`%s` (Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Дохід на $100 Long: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
-								info.Symbol, info.MarkPrice, info.LastFundingRate, payoutPer100,
-								nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
-							)); sb.WriteString("------------------------------\n"); negCount++; foundNeg = true
+							payoutPer100 := 100 * (-info.LastFundingRate / 100.0); nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation); durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+							sb.WriteString(fmt.Sprintf("`%s` (Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Дохід на $100 Long: `+$%.2f`\n  Наступна: `%s` (через %s)\n", info.Symbol, info.MarkPrice, info.LastFundingRate, payoutPer100, nextTimeKyiv.Format("15:04 (02.01)"), durationToNext)); sb.WriteString("------------------------------\n"); negCount++; foundNeg = true
 						}
 					}
 					if !foundNeg { sb.WriteString(fmt.Sprintf("_Немає негативних ставок нижче `-%.4f%%`._\n", currentFundingThreshold)) }
@@ -325,24 +301,30 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 				}
 			}
 		}
-
 		if sentMsgObj.MessageID != 0 && errSendLoad == nil {
-			editText := tgbotapi.NewEditMessageText(chatID, sentMsgObj.MessageID, fundingReportText)
-			editText.ParseMode = tgbotapi.ModeMarkdown
+			editText := tgbotapi.NewEditMessageText(chatID, sentMsgObj.MessageID, fundingReportText); editText.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, editText, "funding_report_edit", chatID)
 		} else {
-			finalMsg := tgbotapi.NewMessage(chatID, fundingReportText)
-			finalMsg.ParseMode = tgbotapi.ModeMarkdown
+			finalMsg := tgbotapi.NewMessage(chatID, fundingReportText); finalMsg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, finalMsg, "funding_report_new", chatID)
 		}
 		keyboard.ShowMainKeyboard(bot, chatID)
-
+	
+	// Команда /motivation ВИДАЛЕНА звідси.
+	// Якщо ви все ж хочете залишити текстову команду /motivation, розкоментуйте цей блок:
+	/*
 	case "/motivation":
+		log.Printf("Обробка '/motivation' для ChatID %d", chatID)
+		// Потрібно переконатися, що пакет motivation імпортовано, якщо він використовується
+		// import "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 		motivationText := motivation.GetRandomMotivation()
 		msg := tgbotapi.NewMessage(chatID, motivationText)
-		sendAndLog(bot, msg, "motivation", chatID)
+		sendAndLog(bot, msg, "motivation_cmd", chatID)
 		keyboard.ShowMainKeyboard(bot, chatID)
-	case "/report", "📊 Прогрес":
+	*/
+
+	case keyboard.BtnProgress, "/report":
+		log.Printf("Обробка '%s' для ChatID %d", msgText, chatID)
 		ReportProgress(bot, update.Message, srv, cfg)
 	default:
 		log.Printf("Не розпізнана команда або текст для ChatID %d: '%s'", chatID, msgText)
