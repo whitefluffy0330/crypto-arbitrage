@@ -16,16 +16,18 @@ import (
 const (
 	mexcAPIEndpointBase   = "https://contract.mexc.com/api/v1/contract"
 	allContractsPath    = "/detail"
-	fundingRatePath     = "/funding_rate/"
-	fairPricePath       = "/fair_price/"
-	maxConcurrentRequests = 5 
-	maxErrorLogs        = 5 
+	fundingRatePath     = "/funding_rate/" // Додається {symbol}
+	fairPricePath       = "/fair_price/"   // Додається {symbol}
+	maxConcurrentRequests = 5                // Обмеження одночасних запитів до API MEXC
+	maxErrorLogs        = 5                // Максимальна кількість помилок кожного типу для логування
 )
+
+// --- Структури для відповіді API MEXC ---
 
 type MEXCContractDetail struct {
 	Symbol          string  `json:"symbol"`
 	DisplayName     string  `json:"displayName"`
-	State           int     `json:"state"` 
+	State           int     `json:"state"` // 0:SHOWING, 1:HIDE, 2:SUSPENDED
 	SettleCoin      string  `json:"settleCoin"`
 	BaseCoin        string  `json:"baseCoin"`
 	QuoteCoin       string  `json:"quoteCoin"`
@@ -36,74 +38,49 @@ type MEXCContractDetail struct {
 	VolScale        int     `json:"volScale"`
 	AmountScale     int     `json:"amountScale"`
 	FundingInterval int     `json:"fundingInterval"`
+	// Додамо поле для обсягу, якщо воно є; документація не дуже чітка,
+	// але спробуємо знайти щось схоже на volValue24h або quoteVolume24h
+	// Поки що залишимо без явного поля обсягу, будемо брати всі активні USDT пари.
+	// Якщо відповідь буде занадто довгою, повернемося до цього.
 }
 
 type MEXCFundingRateInfo struct {
+	Success         bool    `json:"success"` // MEXC часто використовує це поле
+	Code            int     `json:"code"`
+	Data            *MEXCFundingRateData `json:"data,omitempty"` // Використовуємо вказівник, щоб перевірити на nil
+}
+type MEXCFundingRateData struct {
 	Symbol          string  `json:"symbol"`
-	FundingRate     float64 `json:"fundingRate"`
-	NextFundingTime int64   `json:"nextFundingTime"` // Припускаємо, що це Unix Timestamp в СЕКУНДАХ
+	FundingRate     float64 `json:"fundingRate"`   // Ставка як десяткове число (0.0001 для 0.01%)
+	NextFundingTime int64   `json:"nextFundingTime"` // Час наступної виплати (UTC ms)
 }
 
 type MEXCFairPriceInfo struct {
+	Success   bool    `json:"success"`
+	Code      int     `json:"code"`
+	Data      *MEXCFairPriceData `json:"data,omitempty"`
+}
+type MEXCFairPriceData struct {
 	Symbol    string  `json:"symbol"`
-	FairPrice float64 `json:"fairPrice"`
+	FairPrice float64 `json:"fairPrice"` // Ціна маркування
 }
 
-type MEXCAPIResponseWrapper struct {
-	Success bool            `json:"success,omitempty"`
-	Code    int             `json:"code,omitempty"`
-	Msg     string          `json:"msg,omitempty"`
-	Data    json.RawMessage `json:"data"`
+// MEXCAllContractsResponse для /api/v1/contract/detail
+type MEXCAllContractsResponse struct {
+	Success bool                 `json:"success"`
+	Code    int                  `json:"code"`
+	Data    []MEXCContractDetail `json:"data"`
 }
 
-func fetchMEXCSingleObjectData(url string, target interface{}) error {
-	client := http.Client{Timeout: 20 * time.Second} 
-	resp, err := client.Get(url)
-	if err != nil {
-		return fmt.Errorf("HTTP GET до %s: %w", url, err)
-	}
-	defer resp.Body.Close()
 
-	bodyBytes, errRead := io.ReadAll(resp.Body)
-	if errRead != nil {
-		return fmt.Errorf("читання тіла відповіді від %s: %w", url, errRead)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("MEXC: Помилка статусу %d від %s. Тіло: %s", resp.StatusCode, url, string(bodyBytes))
-		return fmt.Errorf("статус %d від %s", resp.StatusCode, url)
-	}
-
-	var wrapper MEXCAPIResponseWrapper
-	errUnmarshalWrapper := json.Unmarshal(bodyBytes, &wrapper)
-
-	if errUnmarshalWrapper == nil && (wrapper.Code == 200 || wrapper.Code == 0 || wrapper.Success) {
-		if len(wrapper.Data) > 0 && string(wrapper.Data) != "null" {
-			if err := json.Unmarshal(wrapper.Data, target); err != nil {
-				return fmt.Errorf("декодування поля 'data' (%s) від %s: %w. Raw 'data': %s", string(wrapper.Data), url, err, string(wrapper.Data))
-			}
-			return nil
-		}
-		if errDirect := json.Unmarshal(bodyBytes, target); errDirect == nil {
-			return nil
-		}
-		return nil
-	}
-
-	if errDirect := json.Unmarshal(bodyBytes, target); errDirect != nil {
-		log.Printf("MEXC: Помилка прямого декодування відповіді від %s: %v. Сира відповідь: %s", url, errDirect, string(bodyBytes))
-		return fmt.Errorf("декодування прямої відповіді від %s: %w (також не вдалося розпарсити як обгортку: %v)", url, errDirect, errUnmarshalWrapper)
-	}
-	return nil
-}
-
+// GetFundingRates отримує ставки фінансування для USDT-M контрактів з MEXC
 func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	log.Println("MEXC: Початок отримання даних про ставки фінансування...")
 
-	var allContracts []MEXCContractDetail
+	var allContractsResponse MEXCAllContractsResponse
 	contractsURL := mexcAPIEndpointBase + allContractsPath
-
-	client := http.Client{Timeout: 20 * time.Second}
+	
+	client := http.Client{Timeout: 20 * time.Second} // Збільшено таймаут для /detail
 	resp, err := client.Get(contractsURL)
 	if err != nil {
 		log.Printf("MEXC: Помилка HTTP GET запиту для отримання списку інструментів (%s): %v", contractsURL, err)
@@ -112,35 +89,24 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytesLog, _ := io.ReadAll(resp.Body) // Читаємо для логування помилки
-		log.Printf("MEXC: Помилка статусу при отриманні списку інструментів (%s): %s. Тіло: %s", contractsURL, resp.Status, string(bodyBytesLog))
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("MEXC: Помилка статусу при отриманні списку інструментів (%s): %s. Тіло: %s", contractsURL, resp.Status, string(bodyBytes))
 		return nil, fmt.Errorf("статус %d від %s", resp.StatusCode, contractsURL)
 	}
 	
-	var detailWrapper struct {
-		Code    int                  `json:"code"`
-		Data    []MEXCContractDetail `json:"data"`
-		Msg     string               `json:"msg,omitempty"`
+	if err := json.NewDecoder(resp.Body).Decode(&allContractsResponse); err != nil {
+		bodyBytesForLog, _ := io.ReadAll(io.NopCloser(resp.Body)) // Спробуємо прочитати для логу, якщо можливо
+		log.Printf("MEXC: Помилка декодування відповіді від /detail: %v. Сира відповідь (якщо вдалося прочитати): %s", err, string(bodyBytesForLog))
+		return nil, fmt.Errorf("декодування відповіді /detail MEXC: %w", err)
 	}
 
-	bodyBytes, errRead := io.ReadAll(resp.Body) // Читаємо тіло для декодування
-	if errRead != nil {
-		log.Printf("MEXC: Помилка читання тіла відповіді для /detail: %v", errRead)
-		return nil, fmt.Errorf("читання тіла відповіді MEXC /detail: %w", errRead)
+	if !allContractsResponse.Success || (allContractsResponse.Code != 0 && allContractsResponse.Code != 200) {
+		log.Printf("MEXC: API /detail повернуло неуспішний результат: success=%t, code=%d", allContractsResponse.Success, allContractsResponse.Code)
+		return nil, fmt.Errorf("API MEXC /detail повернуло неуспішний результат: success=%t, code=%d", allContractsResponse.Success, allContractsResponse.Code)
 	}
-
-	if err := json.Unmarshal(bodyBytes, &detailWrapper); err != nil {
-		log.Printf("MEXC: Помилка декодування обгортки списку інструментів: %v. Сира відповідь (перші 500 байт): %s", err, string(bodyBytes[:min(500,len(bodyBytes))]))
-		return nil, fmt.Errorf("декодування обгортки інструментів MEXC: %w", err)
-	}
-
-	if detailWrapper.Code != 0 && detailWrapper.Code != 200 {
-		log.Printf("MEXC: API /detail повернуло помилку: code %d, msg: %s", detailWrapper.Code, detailWrapper.Msg)
-		return nil, fmt.Errorf("API MEXC /detail повернуло помилку: %s (код %d)", detailWrapper.Msg, detailWrapper.Code)
-	}
-	allContracts = detailWrapper.Data
 	
-	log.Printf("MEXC: Отримано %d контрактів.", len(allContracts))
+	allContracts := allContractsResponse.Data
+	log.Printf("MEXC: Отримано %d контрактів з /detail.", len(allContracts))
 
 	var usdtSwapSymbols []string
 	for _, contract := range allContracts {
@@ -148,11 +114,18 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 			usdtSwapSymbols = append(usdtSwapSymbols, contract.Symbol)
 		}
 	}
-	log.Printf("MEXC: Знайдено %d активних USDT_SWAP контрактів.", len(usdtSwapSymbols))
+	log.Printf("MEXC: Знайдено %d активних USDT_SWAP контрактів для обробки.", len(usdtSwapSymbols))
 	if len(usdtSwapSymbols) == 0 {
-		log.Println("MEXC: Не знайдено активних USDT_SWAP контрактів для обробки.")
 		return []exchanges.UnifiedFundingRateInfo{}, nil
 	}
+	
+	// Обмежимо кількість символів для обробки, щоб прискорити
+	processingLimit := 75 // Беремо перші N символів зі списку (список не відсортований за обсягом)
+	if len(usdtSwapSymbols) > processingLimit {
+		log.Printf("MEXC: Обмежуємо обробку до перших %d з %d знайдених USDT_SWAP контрактів.", processingLimit, len(usdtSwapSymbols))
+		usdtSwapSymbols = usdtSwapSymbols[:processingLimit]
+	}
+
 
 	var fundingData []exchanges.UnifiedFundingRateInfo
 	var wg sync.WaitGroup
@@ -161,8 +134,7 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 
 	var fairPriceErrorCount int32
 	var fundingRateErrorCount int32
-	var fairPriceEmptyCount int32
-	var fundingRateEmptyCount int32
+	var processedCount int32
 
 
 	for _, symbol := range usdtSwapSymbols {
@@ -173,92 +145,131 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			var fairPriceInfo MEXCFairPriceInfo
+			// 1. Отримати Fair Price (Mark Price)
+			var fairPriceResponse MEXCFairPriceInfo
 			fairPriceURL := mexcAPIEndpointBase + fairPricePath + s
-			if err := fetchMEXCSingleObjectData(fairPriceURL, &fairPriceInfo); err != nil {
+			
+			httpClient := http.Client{Timeout: 10 * time.Second}
+			fpResp, fpErr := httpClient.Get(fairPriceURL)
+			if fpErr != nil {
 				mu.Lock()
 				if fairPriceErrorCount < maxErrorLogs {
-					log.Printf("MEXC: Помилка отримання fair_price для %s: %v", s, err)
-					fairPriceErrorCount++
+					log.Printf("MEXC: Помилка HTTP GET fair_price для %s: %v", s, fpErr)
 				}
+				fairPriceErrorCount++
 				mu.Unlock()
 				return
 			}
-			if fairPriceInfo.Symbol == "" { 
+			defer fpResp.Body.Close()
+			if fpResp.StatusCode != http.StatusOK {
 				mu.Lock()
-				if fairPriceEmptyCount < maxErrorLogs {
-					fairPriceEmptyCount++
+				if fairPriceErrorCount < maxErrorLogs {
+					log.Printf("MEXC: Помилка статусу %d при отриманні fair_price для %s", fpResp.StatusCode, s)
 				}
+				fairPriceErrorCount++
+				mu.Unlock()
+				return
+			}
+			if err := json.NewDecoder(fpResp.Body).Decode(&fairPriceResponse); err != nil {
+				mu.Lock()
+				if fairPriceErrorCount < maxErrorLogs {
+					log.Printf("MEXC: Помилка декодування fair_price для %s: %v", s, err)
+				}
+				fairPriceErrorCount++
+				mu.Unlock()
+				return
+			}
+			if !fairPriceResponse.Success || (fairPriceResponse.Code !=0 && fairPriceResponse.Code !=200) || fairPriceResponse.Data == nil {
+				mu.Lock()
+				if fairPriceErrorCount < maxErrorLogs {
+					log.Printf("MEXC: API fair_price для %s повернуло неуспіх або порожні дані: success=%t, code=%d", s, fairPriceResponse.Success, fairPriceResponse.Code)
+				}
+				fairPriceErrorCount++
 				mu.Unlock()
 				return
 			}
 
-			var fundingRateInfo MEXCFundingRateInfo
+
+			// 2. Отримати Funding Rate
+			var fundingRateResponse MEXCFundingRateInfo
 			fundingRateURL := mexcAPIEndpointBase + fundingRatePath + s
-			if err := fetchMEXCSingleObjectData(fundingRateURL, &fundingRateInfo); err != nil {
+			
+			frResp, frErr := httpClient.Get(fundingRateURL)
+			if frErr != nil {
 				mu.Lock()
 				if fundingRateErrorCount < maxErrorLogs {
-					log.Printf("MEXC: Помилка отримання funding_rate для %s: %v", s, err)
-					fundingRateErrorCount++
+					log.Printf("MEXC: Помилка HTTP GET funding_rate для %s: %v", s, frErr)
 				}
+				fundingRateErrorCount++
 				mu.Unlock()
 				return
 			}
-			 if fundingRateInfo.Symbol == "" {
+			defer frResp.Body.Close()
+			if frResp.StatusCode != http.StatusOK {
 				mu.Lock()
-				if fundingRateEmptyCount < maxErrorLogs {
-					fundingRateEmptyCount++
+				if fundingRateErrorCount < maxErrorLogs {
+					log.Printf("MEXC: Помилка статусу %d при отриманні funding_rate для %s", frResp.StatusCode, s)
 				}
+				fundingRateErrorCount++
+				mu.Unlock()
+				return
+			}
+			if err := json.NewDecoder(frResp.Body).Decode(&fundingRateResponse); err != nil {
+				mu.Lock()
+				if fundingRateErrorCount < maxErrorLogs {
+					log.Printf("MEXC: Помилка декодування funding_rate для %s: %v", s, err)
+				}
+				fundingRateErrorCount++
+				mu.Unlock()
+				return
+			}
+			if !fundingRateResponse.Success || (fundingRateResponse.Code !=0 && fundingRateResponse.Code !=200) || fundingRateResponse.Data == nil {
+				mu.Lock()
+				if fundingRateErrorCount < maxErrorLogs {
+                	log.Printf("MEXC: API funding_rate для %s повернуло неуспіх або порожні дані: success=%t, code=%d", s, fundingRateResponse.Success, fundingRateResponse.Code)
+				}
+				fundingRateErrorCount++
 				mu.Unlock()
                 return
             }
 			
-			fundingRatePercent := fundingRateInfo.FundingRate * 100 
-			// ВИПРАВЛЕНО КОНВЕРТАЦІЮ ЧАСУ ДЛЯ MEXC (припускаємо, що це секунди)
-			nextFundingTime := time.Unix(fundingRateInfo.NextFundingTime/1000, 0).UTC() // Розділимо на 1000, якщо це все ж мілісекунди
-                                                                                     // Або якщо це точно секунди: time.Unix(fundingRateInfo.NextFundingTime, 0).UTC()
-                                                                                     // Потрібно перевірити документацію API MEXC для формату nextFundingTime
-                                                                                     // Якщо API MEXC повертає мілісекунди, то оригінальний код:
-                                                                                     // nextFundingTime := time.Unix(0, fundingRateInfo.NextFundingTime*int64(time.Millisecond)).UTC()
-                                                                                     // МАВ БУТИ ПРАВИЛЬНИМ.
-                                                                                     // Давайте спробуємо припустити, що це все ж мілісекунди, але можливо, іноді приходить 0 або невалід.
-                                                                                     // Якщо NextFundingTime == 0, то time.Unix(0,0) дасть 1970-01-01.
+			fundingRateDataAPI := fundingRateResponse.Data
+			fairPriceDataAPI := fairPriceResponse.Data
 
-			// Якщо fundingRateInfo.NextFundingTime часто буває 0 або невалідним,
-			// то потрібно обробляти цей випадок, можливо, не показуючи час, або показуючи "N/A"
-			if fundingRateInfo.NextFundingTime <= 0 { // Додамо перевірку на валідність часу
-				// log.Printf("MEXC: Отримано невалідний NextFundingTime (%d) для %s. Пропускаємо час.", fundingRateInfo.NextFundingTime, s)
-				// У цьому випадку можна встановити якийсь "порожній" час або не заповнювати його,
-				// а в handler.go перевіряти, чи час встановлено.
-				// Поки що залишимо конвертацію, але логування допоможе.
+			// Перевіряємо, чи дані не nil
+			if fundingRateDataAPI == nil || fairPriceDataAPI == nil {
+				// log.Printf("MEXC: Одне з полів data є nil для %s", s)
+				return
 			}
-			// ЗАЛИШАЄМО ПОПЕРЕДНЮ КОНВЕРТАЦІЮ, припускаючи мілісекунди, але проблема може бути в самих даних.
-			nextFundingTime = time.Unix(0, fundingRateInfo.NextFundingTime*int64(time.Millisecond)).UTC()
 
-
+			fundingRatePercent := fundingRateDataAPI.FundingRate * 100 
+			nextFundingTime := time.Unix(0, fundingRateDataAPI.NextFundingTime*int64(time.Millisecond)).UTC()
+			
 			symbolClean := strings.Replace(s, "_", "", 1)
 
 			mu.Lock()
 			fundingData = append(fundingData, exchanges.UnifiedFundingRateInfo{
 				Exchange:        "MEXC",
 				Symbol:          symbolClean,
-				MarkPrice:       fairPriceInfo.FairPrice,
+				MarkPrice:       fairPriceDataAPI.FairPrice,
 				LastFundingRate: fundingRatePercent,
 				NextFundingTime: nextFundingTime,
 			})
+			processedCount++
 			mu.Unlock()
 		}(symbol)
 	}
 	wg.Wait()
 
-	log.Printf("MEXC: Успішно оброблено та зібрано дані фінансування для %d USDT SWAP пар (з %d спроб). Помилок FairPrice: %d (з них порожніх: %d), Помилок FundingRate: %d (з них порожніх: %d).",
-		len(fundingData), len(usdtSwapSymbols), fairPriceErrorCount, fairPriceEmptyCount, fundingRateErrorCount, fundingRateEmptyCount)
+	log.Printf("MEXC: Успішно оброблено та зібрано дані фінансування для %d з %d USDT SWAP пар. Помилок FairPrice: %d, Помилок FundingRate: %d.",
+		processedCount, len(usdtSwapSymbols), fairPriceErrorCount, fundingRateErrorCount)
 	return fundingData, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+// min функція не використовується, якщо логуємо лише перші 500 байт сирої відповіді
+// func min(a, b int) int {
+// 	if a < b {
+// 		return a
+// 	}
+// 	return b
+// }
