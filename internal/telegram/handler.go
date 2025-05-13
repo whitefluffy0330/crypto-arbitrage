@@ -10,9 +10,10 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" // Для UnifiedFundingRateInfo
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx" // ДОДАНО ІМПОРТ OKX
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
@@ -240,7 +241,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnFundingRates, "/funding":
 		log.Printf("Обробка команди /funding для ChatID: %d", chatID)
-		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки з ваших бірж (Binance, Bybit)...")
+		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую ставки з ваших бірж (Binance, Bybit, OKX)...") // Оновлено
 		sentMsgObj, errSendLoad := bot.Send(loadingMsg)
 		if errSendLoad != nil {
 			log.Printf("ПОМИЛКА send loadingMsg /funding: %v", errSendLoad)
@@ -252,6 +253,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		var allFundingRates []exchanges.UnifiedFundingRateInfo
 		var errorsText []string
 
+		// --- Binance ---
 		binanceRates, errBinance := binance.GetFundingRates()
 		if errBinance != nil {
 			log.Printf("Помилка отримання даних з Binance для /funding: %v", errBinance)
@@ -260,7 +262,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			allFundingRates = append(allFundingRates, binanceRates...)
 			log.Printf("Отримано %d ставок з Binance", len(binanceRates))
 		}
-
+		
+		// --- Bybit ---
 		bybitRates, errBybit := bybit.GetFundingRates()
 		if errBybit != nil {
 			log.Printf("Помилка отримання даних з Bybit для /funding: %v", errBybit)
@@ -269,6 +272,18 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			allFundingRates = append(allFundingRates, bybitRates...)
 			log.Printf("Отримано %d ставок з Bybit", len(bybitRates))
 		}
+
+		// --- OKX ---
+		okxRates, errOKX := okx.GetFundingRates()
+		if errOKX != nil {
+			log.Printf("Помилка отримання даних з OKX для /funding: %v", errOKX)
+			errorsText = append(errorsText, "⚠️ OKX: не вдалося завантажити дані.")
+		} else {
+			allFundingRates = append(allFundingRates, okxRates...)
+			log.Printf("Отримано %d ставок з OKX", len(okxRates))
+		}
+		
+		// --- Тут буде отримання даних з MEXC, Bitget і т.д. ---
 
 		var fundingReportText string
 		if len(allFundingRates) == 0 && len(errorsText) > 0 {
@@ -279,19 +294,17 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			sort.SliceStable(allFundingRates, func(i, j int) bool {
 				rateI := allFundingRates[i].LastFundingRate
 				rateJ := allFundingRates[j].LastFundingRate
-				if rateI > 0 && rateJ > 0 { return rateI > rateJ }
-				if rateI < 0 && rateJ < 0 { return rateI < rateJ }
-				return rateI > rateJ
+				if rateI > 0 && rateJ > 0 { return rateI > rateJ } 
+				if rateI < 0 && rateJ < 0 { return rateI < rateJ } 
+				return rateI > rateJ 
 			})
 
 			var sb strings.Builder
-			sb.WriteString("📊 **Funding Rates (Binance, Bybit):**\n") // Оновлений заголовок
+			sb.WriteString("📊 **Funding Rates (Binance, Bybit, OKX):**\n") // Оновлено заголовок
 			sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
-			// ОНОВЛЕНИЙ РЯДОК "ШАПКИ"
 			sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n")
 
-
-			limit := 5 // Зменшуємо ліміт, щоб повідомлення не було занадто довгим
+			limit := 5 
 			posCount := 0
 			negCount := 0
 
@@ -301,10 +314,9 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			for _, info := range allFundingRates {
 				if posCount >= limit { break }
 				if info.LastFundingRate > currentFundingThreshold {
-					profitPer100 := 100 * (info.LastFundingRate / 100.0)
+					profitPer100 := 100 * (info.LastFundingRate / 100.0) 
 					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
-					// ОНОВЛЕНИЙ ФОРМАТ ДЛЯ ПОЗИТИВНИХ СТАВОК
 					sb.WriteString(fmt.Sprintf(
 						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Прогноз доходу на $100 Short до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
 						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, profitPer100,
@@ -334,7 +346,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 					payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
 					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
-					// ОНОВЛЕНИЙ ФОРМАТ ДЛЯ НЕГАТИВНИХ СТАВОК
 					sb.WriteString(fmt.Sprintf(
 						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Прогноз доходу на $100 Long до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
 						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, payoutPer100,
@@ -353,11 +364,30 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		if sentMsgObj.MessageID != 0 && errSendLoad == nil {
 			editText := tgbotapi.NewEditMessageText(chatID, sentMsgObj.MessageID, fundingReportText)
 			editText.ParseMode = tgbotapi.ModeMarkdown
-			sendAndLog(bot, editText, "funding_report_edit", chatID)
-		} else {
+			if len(editText.Text) > tgbotapi.MaxMessageSize {
+				log.Printf("ПОМИЛКА: Відредаговане повідомлення для funding_report_edit занадто довге (%d символів). Обрізаємо.", len(editText.Text))
+				editText.Text = editText.Text[:tgbotapi.MaxMessageSize-20] + "\n... (повідомлення обрізано)"
+			}
+
+			if _, err := bot.Send(editText); err != nil { 
+				if strings.Contains(err.Error(), "MESSAGE_TOO_LONG") {
+					log.Printf("ПОМИЛКА надсилання (funding_report_edit) для %d: %v. Повідомлення занадто довге.", chatID, err)
+					errorText := "Помилка: звіт по фандингу занадто довгий. Спробуйте вищий поріг /set_funding_threshold."
+					finalMsg := tgbotapi.NewMessage(chatID, errorText)
+					sendAndLog(bot, finalMsg, "funding_report_too_long_error", chatID)
+				} else {
+					log.Printf("ПОМИЛКА надсилання (funding_report_edit) для %d: %v", chatID, err)
+				}
+			}
+
+		} else { 
 			finalMsg := tgbotapi.NewMessage(chatID, fundingReportText)
 			finalMsg.ParseMode = tgbotapi.ModeMarkdown
-			sendAndLog(bot, finalMsg, "funding_report_new", chatID)
+			if len(finalMsg.Text) > tgbotapi.MaxMessageSize {
+				log.Printf("ПОМИЛКА: Нове повідомлення для funding_report_new занадто довге (%d символів). Обрізаємо.", len(finalMsg.Text))
+				finalMsg.Text = finalMsg.Text[:tgbotapi.MaxMessageSize-20] + "\n... (повідомлення обрізано)"
+			}
+			sendAndLog(bot, finalMsg, "funding_report_new", chatID) 
 		}
 		keyboard.ShowMainKeyboard(bot, chatID)
 
