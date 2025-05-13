@@ -12,7 +12,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" // Для UnifiedFundingRateInfo
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" // ДОДАНО ІМПОРТ BYBIT
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
@@ -249,10 +249,9 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		currentFundingThreshold := GetUserFundingThreshold(chatID)
 		log.Printf("Використовується поріг фандингу для ChatID %d: %.4f%%", chatID, currentFundingThreshold)
 
-		var allFundingRates []exchanges.UnifiedFundingRateInfo // Збираємо дані з усіх бірж сюди
-		var errorsText []string // Збираємо помилки з різних бірж
+		var allFundingRates []exchanges.UnifiedFundingRateInfo
+		var errorsText []string
 
-		// --- Отримуємо дані з Binance ---
 		binanceRates, errBinance := binance.GetFundingRates()
 		if errBinance != nil {
 			log.Printf("Помилка отримання даних з Binance для /funding: %v", errBinance)
@@ -261,8 +260,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			allFundingRates = append(allFundingRates, binanceRates...)
 			log.Printf("Отримано %d ставок з Binance", len(binanceRates))
 		}
-		
-		// --- Отримуємо дані з Bybit ---
+
 		bybitRates, errBybit := bybit.GetFundingRates()
 		if errBybit != nil {
 			log.Printf("Помилка отримання даних з Bybit для /funding: %v", errBybit)
@@ -271,9 +269,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			allFundingRates = append(allFundingRates, bybitRates...)
 			log.Printf("Отримано %d ставок з Bybit", len(bybitRates))
 		}
-		
-		// --- Тут буде отримання даних з OKX, MEXC і т.д. ---
-
 
 		var fundingReportText string
 		if len(allFundingRates) == 0 && len(errorsText) > 0 {
@@ -284,17 +279,19 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			sort.SliceStable(allFundingRates, func(i, j int) bool {
 				rateI := allFundingRates[i].LastFundingRate
 				rateJ := allFundingRates[j].LastFundingRate
-				if rateI > 0 && rateJ > 0 { return rateI > rateJ } 
-				if rateI < 0 && rateJ < 0 { return rateI < rateJ } 
-				return rateI > rateJ 
+				if rateI > 0 && rateJ > 0 { return rateI > rateJ }
+				if rateI < 0 && rateJ < 0 { return rateI < rateJ }
+				return rateI > rateJ
 			})
 
 			var sb strings.Builder
-			sb.WriteString("📊 **Funding Rates (Binance, Bybit):**\n") 
+			sb.WriteString("📊 **Funding Rates (Binance, Bybit):**\n") // Оновлений заголовок
 			sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
-			sb.WriteString("_Ставки фінансування – це періодичні платежі... Розрахунок... не враховує торгові комісії._\n\n")
+			// ОНОВЛЕНИЙ РЯДОК "ШАПКИ"
+			sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n")
 
-			limit := 10 
+
+			limit := 10
 			posCount := 0
 			negCount := 0
 
@@ -304,11 +301,12 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			for _, info := range allFundingRates {
 				if posCount >= limit { break }
 				if info.LastFundingRate > currentFundingThreshold {
-					profitPer100 := 100 * (info.LastFundingRate / 100.0) 
+					profitPer100 := 100 * (info.LastFundingRate / 100.0)
 					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+					// ОНОВЛЕНИЙ ФОРМАТ ДЛЯ ПОЗИТИВНИХ СТАВОК
 					sb.WriteString(fmt.Sprintf(
-						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Дохід на $100 Short: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
+						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Прогноз доходу на $100 Short до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
 						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, profitPer100,
 						nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
 					)); sb.WriteString("------------------------------\n"); posCount++; foundPos = true
@@ -336,8 +334,9 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 					payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
 					nextTimeKyiv := info.NextFundingTime.In(sheets.KyivLocation)
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
+					// ОНОВЛЕНИЙ ФОРМАТ ДЛЯ НЕГАТИВНИХ СТАВОК
 					sb.WriteString(fmt.Sprintf(
-						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Дохід на $100 Long: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
+						"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Прогноз доходу на $100 Long до наст. виплати: `+$%.2f`\n  Наступна: `%s` (через %s)\n",
 						info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, payoutPer100,
 						nextTimeKyiv.Format("15:04 (02.01)"), durationToNext,
 					)); sb.WriteString("------------------------------\n"); negCount++; foundNeg = true
@@ -345,7 +344,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 			if !foundNeg { sb.WriteString(fmt.Sprintf("_Немає негативних ставок нижче `-%.4f%%`._\n", currentFundingThreshold)) }
 			
-			// Додаємо повідомлення про помилки, якщо вони були
 			if len(errorsText) > 0 {
 				sb.WriteString("\n\n" + strings.Join(errorsText, "\n"))
 			}
