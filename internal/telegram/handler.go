@@ -25,30 +25,24 @@ const (
 	CallbackCancelCloseGoal  = "cancel_close_goal"
 )
 
-// Допоміжні функції для логування надсилання повідомлень
 func sendAndLog(bot *tgbotapi.BotAPI, c tgbotapi.Chattable, commandName string, chatID int64) {
 	if _, err := bot.Send(c); err != nil {
 		log.Printf("ПОМИЛКА надсилання (%s) для %d: %v", commandName, chatID, err)
-	} else {
-		// log.Printf("Надіслано відповідь (%s) для %d", commandName, chatID) // Можна закоментувати для зменшення логів
 	}
 }
 func requestAndLog(bot *tgbotapi.BotAPI, c tgbotapi.CallbackConfig, commandName string, chatID int64) {
 	if _, err := bot.Request(c); err != nil {
 		log.Printf("ПОМИЛКА Request (%s) для %d: %v", commandName, chatID, err)
-	} else {
-		// log.Printf("Надіслано Callback відповідь (%s) для %d", commandName, chatID) // Можна закоментувати
 	}
 }
 
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
-	// Обробка CallbackQuery
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
 		messageID := update.CallbackQuery.Message.MessageID
 		userName := update.CallbackQuery.From.UserName
 		callbackData := update.CallbackQuery.Data
-		log.Printf("HandleUpdate: Обробка CallbackQuery від [%s](%d): Data=%s, MsgID=%d", userName, chatID, callbackData, messageID)
+		log.Printf("Callback від [%s](%d): Data=%s, MsgID=%d", userName, chatID, callbackData, messageID)
 		var callbackResponseText string
 		originalMessageText := ""
 		if update.CallbackQuery.Message != nil {
@@ -56,7 +50,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		}
 		switch callbackData {
 		case CallbackConfirmCloseGoal:
-			log.Printf("HandleUpdate: Callback ConfirmCloseGoal для %d", chatID)
+			log.Printf("Підтверджено закриття цілі для %d", chatID)
 			err := DeleteUserGoal(chatID, srv, cfg)
 			if err != nil {
 				if strings.Contains(err.Error(), "не знайдено активної цілі") {
@@ -73,14 +67,14 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			sendAndLog(bot, editText, "confirm_close_goal_edit", chatID)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		case CallbackCancelCloseGoal:
-			log.Printf("HandleUpdate: Callback CancelCloseGoal для %d", chatID)
+			log.Printf("Скасовано закриття цілі для %d", chatID)
 			callbackResponseText = "🚫 Закриття цілі скасовано."
 			editText := tgbotapi.NewEditMessageText(chatID, messageID, originalMessageText+"\n\n"+callbackResponseText)
 			editText.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, editText, "cancel_close_goal_edit", chatID)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		default:
-			log.Printf("HandleUpdate: Передача Callback '%s' в goal.HandleCallback", callbackData)
+			log.Printf("Передача Callback '%s' в goal.HandleCallback", callbackData)
 			goal.HandleCallback(bot, update.CallbackQuery, srv, cfg)
 		}
 		answerCallbackCfg := tgbotapi.NewCallback(update.CallbackQuery.ID, callbackResponseText)
@@ -89,32 +83,28 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 
 	if update.Message == nil {
-		log.Println("HandleUpdate: Отримано порожнє повідомлення (update.Message is nil). Пропуск.")
 		return
 	}
 	chatID := update.Message.Chat.ID
 	msgText := update.Message.Text
 	userName := update.Message.From.UserName
-	log.Printf("HandleUpdate: Повідомлення від [%s] (%d): '%s'", userName, chatID, msgText)
+	log.Printf("[%s] (%d): %s", userName, chatID, msgText)
 	currentState := GetUserState(chatID)
-	log.Printf("HandleUpdate: Поточний стан для ChatID %d: '%s'", chatID, currentState)
+	log.Printf("Поточний стан для ChatID %d: '%s'", chatID, currentState)
 
-	// Обробка станів
+
 	switch currentState {
 	case StateAwaitingGoalInput:
-		log.Printf("HandleUpdate: ChatID %d у стані StateAwaitingGoalInput. Обробка HandleGoalInput.", chatID)
 		HandleGoalInput(bot, update.Message, srv, cfg)
 		SetUserState(chatID, StateDefault)
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
 	case StateAwaitingInvestmentInput:
-		log.Printf("HandleUpdate: ChatID %d у стані StateAwaitingInvestmentInput. Обробка HandleInvestmentInput.", chatID)
 		HandleInvestmentInput(bot, update.Message, srv, cfg)
 		SetUserState(chatID, StateDefault)
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
 	case StateAwaitingFundingThreshold:
-		log.Printf("HandleUpdate: ChatID %d у стані StateAwaitingFundingThreshold. Обробка введення порогу: '%s'", chatID, msgText)
 		thresholdStr := strings.TrimSpace(update.Message.Text)
 		threshold, err := strconv.ParseFloat(thresholdStr, 64)
 		if err != nil {
@@ -122,13 +112,13 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "set_funding_threshold_error", chatID)
-		} else if threshold < 0 || threshold > 100 {
+		} else if threshold < 0 || threshold > 100 { 
 			responseText := fmt.Sprintf("⚠️ Поріг `%.4f%%` не є коректним. Введіть значення від 0 до 100.", threshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "set_funding_threshold_range_error", chatID)
 		} else {
-			SetUserFundingThreshold(chatID, threshold)
+			SetUserFundingThreshold(chatID, threshold) 
 			responseText := fmt.Sprintf("✅ Поріг для ставок фінансування встановлено: `%.4f%%`.\nКоманда `/funding` тепер буде показувати ставки вище (або нижче для негативних) цього значення.", threshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
@@ -138,75 +128,57 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
 	}
-
-	// ТИМЧАСОВА ПЕРЕВІРКА ДЛЯ ДІАГНОСТИКИ /set_funding_threshold
-	log.Printf("HandleUpdate: Перед ТИМЧАСОВОЮ перевіркою. msgText: '%s'", msgText)
-	if msgText == "/set_funding_threshold" { // Точне співпадіння для команди без аргументів
-		log.Printf("HandleUpdate: ТИМЧАСОВА перевірка спрацювала! msgText == \"/set_funding_threshold\"")
-		currentThreshold := GetUserFundingThreshold(chatID)
-		responseText := fmt.Sprintf("ℹ️ Поточний поріг: `%.4f%%`.\nВведіть новий поріг (число, наприклад, 0.01):", currentThreshold)
-		msg := tgbotapi.NewMessage(chatID, responseText)
-		msg.ParseMode = tgbotapi.ModeMarkdown
-		sendAndLog(bot, msg, "set_funding_threshold_info_temp", chatID)
-		SetUserState(chatID, StateAwaitingFundingThreshold)
-		log.Printf("HandleUpdate: Стан для ChatID %d -> %s (з тимчасової перевірки)", chatID, StateAwaitingFundingThreshold)
-		return
-	} else if strings.HasPrefix(msgText, "/set_funding_threshold ") { // Перевірка команди з пробілом (для аргументу)
-		log.Printf("HandleUpdate: ТИМЧАСОВА перевірка спрацювала для команди з аргументом! msgText: '%s'", msgText)
+	
+	if strings.HasPrefix(msgText, "/set_funding_threshold") {
+		log.Printf("Обробка команди /set_funding_threshold для ChatID %d.", chatID)
 		parts := strings.Fields(msgText)
 		if len(parts) == 2 {
 			thresholdStr := parts[1]
 			threshold, err := strconv.ParseFloat(thresholdStr, 64)
 			if err != nil {
-				responseText := fmt.Sprintf("⚠️ Неправильний формат числа для порогу: `%s`. Використовуйте: `/set_funding_threshold 0.01`.", thresholdStr)
+				responseText := fmt.Sprintf("⚠️ Неправильний формат числа для порогу: `%s`. Використовуйте команду так: `/set_funding_threshold 0.01`.", thresholdStr)
 				msg := tgbotapi.NewMessage(chatID, responseText)
 				msg.ParseMode = tgbotapi.ModeMarkdown
-				sendAndLog(bot, msg, "set_funding_threshold_cmd_error_temp", chatID)
+				sendAndLog(bot, msg, "set_funding_threshold_cmd_error", chatID)
 			} else if threshold < 0 || threshold > 100 {
 				responseText := fmt.Sprintf("⚠️ Поріг `%.4f%%` не є коректним. Введіть значення від 0 до 100.", threshold)
 				msg := tgbotapi.NewMessage(chatID, responseText)
 				msg.ParseMode = tgbotapi.ModeMarkdown
-				sendAndLog(bot, msg, "set_funding_threshold_cmd_range_error_temp", chatID)
+				sendAndLog(bot, msg, "set_funding_threshold_cmd_range_error", chatID)
 			} else {
 				SetUserFundingThreshold(chatID, threshold)
-				responseText := fmt.Sprintf("✅ Поріг для ставок фінансування встановлено: `%.4f%%`.", threshold)
+				responseText := fmt.Sprintf("✅ Поріг для ставок фінансування встановлено: `%.4f%%`.\nКоманда `/funding` тепер буде показувати ставки вище (або нижче для негативних) цього значення.", threshold)
 				msg := tgbotapi.NewMessage(chatID, responseText)
 				msg.ParseMode = tgbotapi.ModeMarkdown
-				sendAndLog(bot, msg, "set_funding_threshold_cmd_success_temp", chatID)
-				// Після успішного встановлення через команду з аргументом, показуємо головну клавіатуру
-				keyboard.ShowMainKeyboard(bot, chatID)
+				sendAndLog(bot, msg, "set_funding_threshold_cmd_success", chatID)
 			}
 		} else {
-			// Це може статися, якщо є /set_funding_threshold і щось ще, але не валідний один аргумент
-			responseText := "⚠️ Неправильний формат команди. Використовуйте `/set_funding_threshold` або `/set_funding_threshold ЗНАЧЕННЯ`."
+			currentThreshold := GetUserFundingThreshold(chatID)
+			responseText := fmt.Sprintf("ℹ️ Поточний поріг для ставок фінансування: `%.4f%%`.\nЩоб встановити новий, введіть команду `/set_funding_threshold ЗНАЧЕННЯ` (наприклад, `/set_funding_threshold 0.01`) або просто надішліть числове значення порогу.", currentThreshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
-			sendAndLog(bot, msg, "set_funding_threshold_cmd_format_error_temp", chatID)
-			keyboard.ShowMainKeyboard(bot, chatID)
+			sendAndLog(bot, msg, "set_funding_threshold_info", chatID)
+			SetUserState(chatID, StateAwaitingFundingThreshold) 
+			log.Printf("Стан для ChatID %d -> %s", chatID, StateAwaitingFundingThreshold)
 		}
-		return
+		return 
 	}
-	log.Printf("HandleUpdate: msgText '%s' не пройшов ТИМЧАСОВУ перевірку для /set_funding_threshold. Перехід до основного switch.", msgText)
 
-	// Основний switch для інших команд
 	switch msgText {
 	case "/start", "🔁 Старт":
-		log.Printf("HandleUpdate: Обробка /start для ChatID %d", chatID)
 		commands.StartWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case "/stop", "⛔️ Стоп":
-		log.Printf("HandleUpdate: Обробка /stop для ChatID %d", chatID)
 		commands.StopWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case "/dayoff", "🏖 Вихідний":
-		log.Printf("HandleUpdate: Обробка /dayoff для ChatID %d", chatID)
 		commands.DayOff(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case "/goal", "🎯 Моя ціль":
-		log.Printf("HandleUpdate: Обробка /goal для ChatID %d", chatID)
+		log.Printf("Обробка /goal для %d", chatID)
 		currentGoal, exists := GetUserGoal(chatID, srv, cfg)
 		if exists {
-			log.Printf("HandleUpdate: Знайдено ціль для %d: %+v", chatID, currentGoal)
+			log.Printf("Знайдено ціль для %d: %+v", chatID, currentGoal)
 			goalInfoText := fmt.Sprintf(
 				"📌 Ваша поточна ціль:\n\nСума: `%.2f %s`\n(Ціль на %s %d)\nВстановлено: `%s`\n\nЯкщо бажаєте встановити нову ціль, поточна буде автоматично заархівована.\nЩоб встановити нову, просто введіть суму (напр. `15000 грн`).",
 				currentGoal.Amount, currentGoal.Currency,
@@ -217,17 +189,17 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			msg := tgbotapi.NewMessage(chatID, goalInfoText)
 			msg.ParseMode = tgbotapi.ModeMarkdown
 			sendAndLog(bot, msg, "view_goal_exists", chatID)
-			goal.HandleMyGoalCommand(bot, chatID)
+			goal.HandleMyGoalCommand(bot, chatID) 
 			SetUserState(chatID, StateAwaitingGoalInput)
-			log.Printf("HandleUpdate: Стан %d -> %s (для оновлення існуючої)", chatID, StateAwaitingGoalInput)
+			log.Printf("Стан %d -> %s (для оновлення існуючої)", chatID, StateAwaitingGoalInput)
 		} else {
-			log.Printf("HandleUpdate: Активна ціль для %d не знайдена.", chatID)
+			log.Printf("Активна ціль для %d не знайдена.", chatID)
 			goal.HandleMyGoalCommand(bot, chatID)
 			SetUserState(chatID, StateAwaitingGoalInput)
-			log.Printf("HandleUpdate: Стан %d -> %s", chatID, StateAwaitingGoalInput)
+			log.Printf("Стан %d -> %s", chatID, StateAwaitingGoalInput)
 		}
 	case "/closegoal", "❌ Закрити ціль":
-		log.Printf("HandleUpdate: Обробка /closegoal для ChatID %d", chatID)
+		log.Printf("Обробка /closegoal для %d", chatID)
 		currentGoal, exists := GetUserGoal(chatID, srv, cfg)
 		if exists {
 			confirmationText := fmt.Sprintf(
@@ -247,24 +219,24 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			keyboard.ShowMainKeyboard(bot, chatID)
 		}
 	case "/add_investment":
-		log.Printf("HandleUpdate: Обробка /add_investment для ChatID %d", chatID)
+		log.Printf("Обробка /add_investment для %d", chatID)
 		prompt := "➕ Введіть дані про вашу нову інвестицію у форматі:\n`ТИП, НАЗВА/СИМВОЛ, СУМА ВАЛЮТА, ДАТА (РРРР-ММ-ДД)`\n\nНаприклад:\n`Крипто-холд, BTC, 0.5 BTC, 2023-10-25`\n`Акція, META, 1000 USD, 2024-01-15`"
 		msg := tgbotapi.NewMessage(chatID, prompt)
 		msg.ParseMode = tgbotapi.ModeMarkdown
 		sendAndLog(bot, msg, "add_investment_prompt", chatID)
 		SetUserState(chatID, StateAwaitingInvestmentInput)
-		log.Printf("HandleUpdate: Стан %d -> %s", chatID, StateAwaitingInvestmentInput)
+		log.Printf("Стан %d -> %s", chatID, StateAwaitingInvestmentInput)
 
 	case "/funding", "💹 Funding Rates":
-		log.Printf("HandleUpdate: Обробка команди /funding для ChatID: %d", chatID)
+		log.Printf("Обробка команди /funding для ChatID: %d", chatID)
 		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Завантажую топ-монети з CoinGecko та ставки з Binance Futures...")
 		sentMsgObj, errSendLoad := bot.Send(loadingMsg)
 		if errSendLoad != nil {
 			log.Printf("ПОМИЛКА send loadingMsg /funding: %v", errSendLoad)
 		}
 
-		currentFundingThreshold := GetUserFundingThreshold(chatID)
-		log.Printf("HandleUpdate: Використовується поріг фандингу для ChatID %d: %.4f%%", chatID, currentFundingThreshold)
+		currentFundingThreshold := GetUserFundingThreshold(chatID) 
+		log.Printf("Використовується поріг фандингу для ChatID %d: %.4f%%", chatID, currentFundingThreshold)
 
 		var fundingReportText string
 		topCoins, errCoinGecko := coingecko.GetTopMarketCapCoins(20, "usd")
@@ -309,7 +281,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 					var sb strings.Builder
 					sb.WriteString("📊 **Funding Rates (Binance Futures) для Топ-Монет (CoinGecko):**\n")
 					sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
-					sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами з Long та Short позиціями... Розрахунок... не враховує торгові комісії._\n\n")
+					sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами... Розрахунок... не враховує торгові комісії._\n\n")
 
 					limit := 7; posCount := 0; negCount := 0
 					sb.WriteString("📈 **Найвищі Позитивні Ставки (Long платить Short):**\n")
@@ -366,16 +338,14 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		keyboard.ShowMainKeyboard(bot, chatID)
 
 	case "/motivation":
-		log.Printf("HandleUpdate: Обробка /motivation для ChatID %d", chatID)
 		motivationText := motivation.GetRandomMotivation()
 		msg := tgbotapi.NewMessage(chatID, motivationText)
 		sendAndLog(bot, msg, "motivation", chatID)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case "/report", "📊 Прогрес":
-		log.Printf("HandleUpdate: Обробка /report для ChatID %d", chatID)
 		ReportProgress(bot, update.Message, srv, cfg)
 	default:
-		log.Printf("HandleUpdate: DEFAULT: Не розпізнана команда або текст для ChatID %d: '%s'", chatID, msgText)
+		log.Printf("Не розпізнана команда або текст для ChatID %d: '%s'", chatID, msgText)
 		unknownCmdMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Вибачте, команда або текст '%s' не оброблені. Скористайтеся кнопками меню.", msgText))
 		sendAndLog(bot, unknownCmdMsg, "unknown_input_or_command", chatID)
 		keyboard.ShowMainKeyboard(bot, chatID)
@@ -394,4 +364,4 @@ func formatDurationToNextFunding(d time.Duration) string {
 	return fmt.Sprintf("%dг %dхв", hours, minutes)
 }
 
-// monthNameUkrainian визначена в report.go і доступна в цьому пакеті.
+// monthNameUkrainian тут не потрібна, вона є в report.go
