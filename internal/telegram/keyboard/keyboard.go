@@ -5,27 +5,45 @@ import (
 	"log"
 )
 
+// Константи для текстів кнопок
+const (
+	BtnMyGoal              = "🎯 Моя ціль"
+	BtnProgress            = "📊 Прогрес"
+	BtnFundingRates        = "💹 Funding Rates"
+	BtnWorkStart           = "🔁 Старт"
+	BtnWorkStop            = "⛔️ Стоп"
+	BtnWorkDayOff          = "🏖 Вихідний"
+	BtnCloseGoal           = "❌ Закрити ціль"
+	BtnAddInvestment       = "➕ Додати Інвестицію"
+	BtnSetFundingThreshold = "⚙️ Поріг Funding"
+	BtnSpreads             = "📈 Спреди" // Нова кнопка для спредів
+)
+
 // ShowMainKeyboard показує головну клавіатуру користувачу
 func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("🎯 Моя ціль"),
-			tgbotapi.NewKeyboardButton("📊 Прогрес"),
-			tgbotapi.NewKeyboardButton("💹 Funding Rates"), // <<< НОВА КНОПКА
+			tgbotapi.NewKeyboardButton(BtnMyGoal),
+			tgbotapi.NewKeyboardButton(BtnProgress),
+			tgbotapi.NewKeyboardButton(BtnFundingRates),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("🔁 Старт"),
-			tgbotapi.NewKeyboardButton("⛔️ Стоп"),
-			tgbotapi.NewKeyboardButton("🏖 Вихідний"),
+			tgbotapi.NewKeyboardButton(BtnWorkStart),
+			tgbotapi.NewKeyboardButton(BtnWorkStop),
+			tgbotapi.NewKeyboardButton(BtnWorkDayOff),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("❌ Закрити ціль"),
-			tgbotapi.NewKeyboardButton("/add_investment"), // Поки що команда, можна зробити кнопкою
+			tgbotapi.NewKeyboardButton(BtnCloseGoal),
+			tgbotapi.NewKeyboardButton(BtnAddInvestment),
+			tgbotapi.NewKeyboardButton(BtnSetFundingThreshold),
+		),
+		tgbotapi.NewKeyboardButtonRow( // Новий рядок для кнопки Спредів
+			tgbotapi.NewKeyboardButton(BtnSpreads),
 		),
 	)
-	keyboard.ResizeKeyboard = true 
+	keyboard.ResizeKeyboard = true
 
-	msg := tgbotapi.NewMessage(chatID, "Оберіть опцію з меню:")
+	msg := tgbotapi.NewMessage(chatID, "Головне меню:")
 	msg.ReplyMarkup = keyboard
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Помилка надсилання головної клавіатури для чату %d: %v", chatID, err)
