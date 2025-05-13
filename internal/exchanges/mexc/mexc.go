@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
+	// "strconv" // ВИДАЛЕНО НЕПОТРІБНИЙ ІМПОРТ
 	"strings"
 	"sync"
 	"time"
@@ -41,26 +41,26 @@ type MEXCContractDetail struct {
 
 type MEXCFundingRateInfo struct {
 	Symbol          string  `json:"symbol"`
-	FundingRate     float64 `json:"fundingRate"`
-	NextFundingTime int64   `json:"nextFundingTime"`
+	FundingRate     float64 `json:"fundingRate"`   // Очікуємо float64 напряму з JSON
+	NextFundingTime int64   `json:"nextFundingTime"` // Час наступної виплати (UTC ms)
 }
 
 type MEXCFairPriceInfo struct {
 	Symbol    string  `json:"symbol"`
-	FairPrice float64 `json:"fairPrice"`
+	FairPrice float64 `json:"fairPrice"` // Очікуємо float64 напряму з JSON
 }
 
 type MEXCAPIResponseSingle struct {
-	Success bool            `json:"success,omitempty"` // omitempty, якщо поля може не бути
-	Code    int             `json:"code,omitempty"`    // omitempty, якщо поля може не бути
-	Msg     string          `json:"msg,omitempty"`     // ДОДАНО omitempty
+	Success bool            `json:"success,omitempty"`
+	Code    int             `json:"code,omitempty"`
+	Msg     string          `json:"msg,omitempty"`
 	Data    json.RawMessage `json:"data"`
 }
 
 type MEXCAPIResponseList struct {
 	Success bool              `json:"success,omitempty"`
 	Code    int               `json:"code,omitempty"`
-	Msg     string            `json:"msg,omitempty"` // ДОДАНО omitempty
+	Msg     string            `json:"msg,omitempty"`
 	Data    []json.RawMessage `json:"data"`
 }
 
@@ -83,13 +83,10 @@ func fetchMEXCData(url string, target interface{}, targetIsList bool) error {
 
 	if !targetIsList {
 		var genericResponse MEXCAPIResponseSingle
-		// Спробуємо розпарсити як обгортку
 		if errUnmarshalWrapper := json.Unmarshal(rawResponse, &genericResponse); errUnmarshalWrapper == nil {
-			// Перевіряємо код помилки, якщо він є
 			if genericResponse.Code != 0 && genericResponse.Code != 200 && genericResponse.Msg != "" {
 				return fmt.Errorf("API MEXC (%s) повернуло помилку: %s (код %d)", url, genericResponse.Msg, genericResponse.Code)
 			}
-			// Якщо є поле data, розпаковуємо його
 			if len(genericResponse.Data) > 0 && string(genericResponse.Data) != "null" {
 				if err := json.Unmarshal(genericResponse.Data, target); err != nil {
 					return fmt.Errorf("декодування поля 'data' від %s: %w", url, err)
@@ -97,35 +94,11 @@ func fetchMEXCData(url string, target interface{}, targetIsList bool) error {
 				return nil
 			}
 		}
-		// Якщо не розпарсилося як обгортка або немає поля 'data',
-		// пробуємо розпарсити напряму в target
 		if err := json.Unmarshal(rawResponse, target); err != nil {
 			return fmt.Errorf("декодування прямої відповіді від %s: %w (після невдалої спроби обгортки)", url, err)
 		}
 		return nil
-	} else { // targetIsList == true
-		// Для списків, API /detail зазвичай повертає просто масив об'єктів [{...},{...}]
-		// або іноді обгортку з полем "data", що містить масив.
-		var genericResponseList MEXCAPIResponseList
-		if errUnmarshalWrapper := json.Unmarshal(rawResponse, &genericResponseList); errUnmarshalWrapper == nil {
-			if genericResponseList.Code != 0 && genericResponseList.Code != 200 && genericResponseList.Msg != "" {
-				return fmt.Errorf("API MEXC (%s) для списку повернуло помилку: %s (код %d)", url, genericResponseList.Msg, genericResponseList.Code)
-			}
-			if len(genericResponseList.Data) > 0 {
-				// Потрібно розпакувати масив json.RawMessage в цільовий зріз
-				// Створюємо тимчасовий зріз того ж типу, що й target (який має бути *[]SomeStruct)
-				// Це складно зробити універсально тут, тому спрощуємо:
-				// Припускаємо, що target - це *[]MEXCContractDetail для /detail
-				// І що genericResponseList.Data містить масив цих структур
-				// Для цього потрібно, щоб target був правильного типу для json.Unmarshal(genericResponseList.Data, target)
-				// Або ж ми розпаковуємо genericResponseList.Data в []json.RawMessage, а потім кожен елемент окремо.
-				// Найпростіше - очікувати, що /detail повертає просто масив, або обгортку, яку ми розпакуємо.
-
-				// Оскільки /detail повертає просто масив, наступний json.Unmarshal(rawResponse, target) має спрацювати.
-				// ВИДАЛЕНО НЕЗАВЕРШЕНИЙ БЛОК З items та rawItem
-			}
-		}
-		// Припускаємо, що /detail повертає просто масив об'єктів, або обгортку, яку ми вже перевірили
+	} else {
 		if err := json.Unmarshal(rawResponse, target); err != nil {
 			return fmt.Errorf("декодування прямого масиву від %s: %w", url, err)
 		}
@@ -151,7 +124,6 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 		log.Printf("MEXC: Помилка статусу при отриманні списку інструментів (%s): %s", contractsURL, resp.Status)
 		return nil, fmt.Errorf("статус %d від %s", resp.StatusCode, contractsURL)
 	}
-	// MEXC /detail повертає масив напряму, без обгортки code/msg/data
 	if err := json.NewDecoder(resp.Body).Decode(&allContracts); err != nil {
 		log.Printf("MEXC: Помилка декодування списку інструментів: %v", err)
 		return nil, fmt.Errorf("декодування інструментів MEXC: %w", err)
@@ -186,25 +158,25 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 			var fairPriceInfo MEXCFairPriceInfo
 			fairPriceURL := mexcAPIEndpointBase + fairPricePath + s
 			if err := fetchMEXCData(fairPriceURL, &fairPriceInfo, false); err != nil {
-				log.Printf("MEXC: Помилка отримання fair_price для %s: %v", s, err)
+				// log.Printf("MEXC: Помилка отримання fair_price для %s: %v", s, err) // Може бути багато логів
 				return
 			}
 			if fairPriceInfo.Symbol == "" {
-				// log.Printf("MEXC: Не знайдено fair_price для %s (або порожня відповідь)", s)
 				return
 			}
 
 			var fundingRateInfo MEXCFundingRateInfo
 			fundingRateURL := mexcAPIEndpointBase + fundingRatePath + s
 			if err := fetchMEXCData(fundingRateURL, &fundingRateInfo, false); err != nil {
-				log.Printf("MEXC: Помилка отримання funding_rate для %s: %v", s, err)
+				// log.Printf("MEXC: Помилка отримання funding_rate для %s: %v", s, err) // Може бути багато логів
 				return
 			}
 			 if fundingRateInfo.Symbol == "" {
-                // log.Printf("MEXC: Не знайдено funding_rate для %s (або порожня відповідь)", s)
                 return
             }
 
+			// API MEXC для /funding_rate/{symbol} вже повертає fundingRate як float64 (не рядок)
+			// і це вже має бути ставка як десяткове число (0.0001 для 0.01%)
 			fundingRatePercent := fundingRateInfo.FundingRate * 100 
 			nextFundingTime := time.Unix(0, fundingRateInfo.NextFundingTime*int64(time.Millisecond)).UTC()
 			
@@ -214,7 +186,7 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 			fundingData = append(fundingData, exchanges.UnifiedFundingRateInfo{
 				Exchange:        "MEXC",
 				Symbol:          symbolClean,
-				MarkPrice:       fairPriceInfo.FairPrice,
+				MarkPrice:       fairPriceInfo.FairPrice, // fairPriceInfo.FairPrice вже float64
 				LastFundingRate: fundingRatePercent,
 				NextFundingTime: nextFundingTime,
 			})
