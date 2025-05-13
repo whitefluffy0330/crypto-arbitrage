@@ -1,7 +1,6 @@
 package mexc
 
 import (
-	// "bytes" // ВИДАЛЕНО НЕПОТРІБНИЙ ІМПОРТ
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,7 +24,7 @@ const (
 type MEXCContractDetail struct {
 	Symbol          string  `json:"symbol"`
 	DisplayName     string  `json:"displayName"`
-	State           string  `json:"state"`
+	State           int     `json:"state"` // ЗМІНЕНО ТИП НА INT
 	SettleCoin      string  `json:"settleCoin"`
 	BaseCoin        string  `json:"baseCoin"`
 	QuoteCoin       string  `json:"quoteCoin"`
@@ -117,19 +116,27 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	}
 	
 	var detailWrapper struct {
-		Success bool                 `json:"success"`
-		Code    int                  `json:"code"`
+		// Success bool `json:"success"` // Поле success може бути відсутнім, орієнтуємося на code
+		Code    int                  `json:"code"`    // Очікуємо 0 або 200 для успіху
 		Data    []MEXCContractDetail `json:"data"`
+		Msg     string               `json:"msg,omitempty"` // Додамо поле Msg для діагностики
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&detailWrapper); err != nil {
-		log.Printf("MEXC: Помилка декодування обгортки списку інструментів: %v", err)
+	bodyBytes, errRead := io.ReadAll(resp.Body)
+	if errRead != nil {
+		log.Printf("MEXC: Помилка читання тіла відповіді для /detail: %v", errRead)
+		return nil, fmt.Errorf("читання тіла відповіді MEXC /detail: %w", errRead)
+	}
+
+	if err := json.Unmarshal(bodyBytes, &detailWrapper); err != nil {
+		log.Printf("MEXC: Помилка декодування обгортки списку інструментів: %v. Сира відповідь: %s", err, string(bodyBytes))
 		return nil, fmt.Errorf("декодування обгортки інструментів MEXC: %w", err)
 	}
 
-	if !detailWrapper.Success && detailWrapper.Code != 0 && detailWrapper.Code != 200 {
-		log.Printf("MEXC: API /detail повернуло помилку: code %d", detailWrapper.Code)
-		return nil, fmt.Errorf("API MEXC /detail повернуло помилку: code %d", detailWrapper.Code)
+	// MEXC повертає code: 0 для успіху в цьому ендпоінті (згідно з їхньою документацією)
+	if detailWrapper.Code != 0 {
+		log.Printf("MEXC: API /detail повернуло помилку: code %d, msg: %s", detailWrapper.Code, detailWrapper.Msg)
+		return nil, fmt.Errorf("API MEXC /detail повернуло помилку: %s (код %d)", detailWrapper.Msg, detailWrapper.Code)
 	}
 	allContracts = detailWrapper.Data
 	
@@ -137,7 +144,8 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 
 	var usdtSwapSymbols []string
 	for _, contract := range allContracts {
-		if contract.State == "SHOWING" && contract.SettleCoin == "USDT" && strings.HasSuffix(contract.Symbol, "_USDT") {
+		// MEXC API: state (0:SHOWING, 1:HIDE, 2:SUSPENDED)
+		if contract.State == 0 && contract.SettleCoin == "USDT" && strings.HasSuffix(contract.Symbol, "_USDT") {
 			usdtSwapSymbols = append(usdtSwapSymbols, contract.Symbol)
 		}
 	}
