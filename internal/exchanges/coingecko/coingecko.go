@@ -11,26 +11,24 @@ import (
 const (
 	coinGeckoAPIEndpoint = "https://api.coingecko.com/api/v3"
 	coinsMarketsPath     = "/coins/markets"
-	coinTickersPath      = "/coins/%s/tickers" // %s буде замінено на coin_id
+	coinTickersPath      = "/coins/%s/tickers"
 )
 
-// CoinMarketData містить основні дані про монету з ендпоінту /coins/markets
-// НАЗВУ ЗМІНЕНО з MarketCoin на CoinMarketData
-type CoinMarketData struct { 
+// CoinMarketData - НАЗВУ ЗМІНЕНО З MarketCoin
+type CoinMarketData struct {
 	ID             string  `json:"id"`
 	Symbol         string  `json:"symbol"`
 	Name           string  `json:"name"`
 	Image          string  `json:"image"`
 	CurrentPrice   float64 `json:"current_price"`
-	MarketCap      int64   `json:"market_cap"`      // Використовуємо int64, як у вашому останньому файлі
+	MarketCap      int64   `json:"market_cap"` // Залишаємо int64, як було у вас, для відповідності json
 	MarketCapRank  int     `json:"market_cap_rank"`
-	TotalVolume    float64 `json:"total_volume"`
+	TotalVolume    float64 `json:"total_volume"` // Додамо, якщо потрібно для фільтрації
 	High24h        float64 `json:"high_24h"`
 	Low24h         float64 `json:"low_24h"`
 	PriceChange24h float64 `json:"price_change_24h"`
 }
 
-// CoinGeckoTickerDetail структура для одного тікера з відповіді /coins/{id}/tickers
 type CoinGeckoTickerDetail struct {
 	Base   string `json:"base"`
 	Target string `json:"target"`
@@ -56,7 +54,6 @@ type CoinGeckoTickerDetail struct {
 	TargetCoinID           string             `json:"target_coin_id,omitempty"`
 }
 
-// CoinGeckoTickersResponse структура для відповіді /coins/{id}/tickers
 type CoinGeckoTickersResponse struct {
 	Name    string                  `json:"name"`
 	Tickers []CoinGeckoTickerDetail `json:"tickers"`
@@ -85,15 +82,14 @@ func GetTopMarketCapCoins(limit int, vsCurrency string) ([]CoinMarketData, error
 		return nil, fmt.Errorf("помилка статусу від CoinGecko API: %s", resp.Status)
 	}
 
-	var coins []CoinMarketData // ВИКОРИСТОВУЄМО НОВУ НАЗВУ ТИПУ
+	var coins []CoinMarketData // ВИКОРИСТОВУЄМО CoinMarketData
 	if err := json.NewDecoder(resp.Body).Decode(&coins); err != nil {
 		return nil, fmt.Errorf("помилка розбору JSON відповіді від CoinGecko: %w", err)
 	}
-	log.Printf("CoinGecko: Отримано топ-%d монет.", len(coins)) // Оновлено лог для відповідності
+	log.Printf("CoinGecko: Отримано топ-%d монет.", len(coins))
 	return coins, nil
 }
 
-// GetCoinTickers отримує тікери для конкретної монети з CoinGecko
 func GetCoinTickers(coinID string, page int) (CoinGeckoTickersResponse, error) {
 	url := fmt.Sprintf("%s%s?page=%d&include_exchange_logo=false&depth=false&order=volume_desc",
 		coinGeckoAPIEndpoint, fmt.Sprintf(coinTickersPath, coinID), page)
