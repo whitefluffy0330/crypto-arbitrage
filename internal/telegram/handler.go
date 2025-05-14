@@ -10,12 +10,12 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bitget"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/mexc"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bitget" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/mexc" 
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
@@ -26,7 +26,7 @@ import (
 const (
 	CallbackConfirmCloseGoal = "confirm_close_goal"
 	CallbackCancelCloseGoal  = "cancel_close_goal"
-	MaxTelegramMessageSize   = 4096
+	MaxTelegramMessageSize   = 4096 
 )
 
 func sendAndLog(bot *tgbotapi.BotAPI, c tgbotapi.Chattable, commandName string, chatID int64) {
@@ -47,12 +47,12 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 	requestAndLog(bot, answerCallback, "funding_exchange_ack", chatID)
 
 	loadingMsgText := fmt.Sprintf("⏳ Завантажую ставки з %s...", exchangeName)
-	var originalMessageID int
+	var originalMessageID int 
 
 	if query.Message != nil {
 		originalMessageID = query.Message.MessageID
 		editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, loadingMsgText)
-		editMsg.ReplyMarkup = nil
+		editMsg.ReplyMarkup = nil 
 		if _, err := bot.Send(editMsg); err != nil {
 			log.Printf("Помилка редагування повідомлення (ID: %d) на 'Завантажую...' для %s: %v. Спробую надіслати нове.", originalMessageID, exchangeName, err)
 			newMsg := tgbotapi.NewMessage(chatID, loadingMsgText)
@@ -64,7 +64,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 				sendAndLog(bot, errMsg, "funding_init_error", chatID)
 				return
 			}
-			originalMessageID = sentLoadingMsg.MessageID
+			originalMessageID = sentLoadingMsg.MessageID 
 		}
 	} else {
 		log.Printf("ПОПЕРЕДЖЕННЯ: query.Message is nil для callback %s, ChatID: %d. Надсилаю нове повідомлення 'Завантажую...'", exchangeCallbackPrefix, chatID)
@@ -76,6 +76,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		}
 		originalMessageID = sentLoadingMsg.MessageID
 	}
+
 
 	var rates []exchanges.UnifiedFundingRateInfo
 	var err error
@@ -89,7 +90,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		rates, err = okx.GetFundingRates()
 	case keyboard.CallbackFundingMEXC:
 		rates, err = mexc.GetFundingRates()
-	case keyboard.CallbackFundingBitget:
+	case keyboard.CallbackFundingBitget: 
 		rates, err = bitget.GetFundingRates()
 	default:
 		log.Printf("Невідомий callback для фандингу: %s", exchangeCallbackPrefix)
@@ -126,7 +127,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		sb.WriteString(fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold))
 		sb.WriteString("_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n")
 
-		limit := 5
+		limit := 5 
 		posCount := 0
 		negCount := 0
 
@@ -137,6 +138,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 			if posCount >= limit { break }
 			if info.LastFundingRate > currentFundingThreshold {
 				profitPer100 := 100 * (info.LastFundingRate / 100.0)
+				
 				var nextFundingDisplay string
 				if info.NextFundingTime.IsZero() || info.NextFundingTime.Unix() <= 0 {
 					nextFundingDisplay = "N/A"
@@ -145,6 +147,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
 					nextFundingDisplay = fmt.Sprintf("%s (через %s)", nextTimeKyiv.Format("15:04 (02.01)"), durationToNext)
 				}
+
 				sb.WriteString(fmt.Sprintf(
 					"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `+%.4f%%`\n  Прогноз доходу на $100 Short до наст. виплати: `+$%.2f`\n  Наступна: %s\n",
 					info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, profitPer100,
@@ -172,6 +175,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		for _, info := range tempNegRates {
 			if negCount >= limit { break }
 				payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
+				
 				var nextFundingDisplay string
 				if info.NextFundingTime.IsZero() || info.NextFundingTime.Unix() <= 0 {
 					nextFundingDisplay = "N/A"
@@ -180,6 +184,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 					durationToNext := formatDurationToNextFunding(time.Until(nextTimeKyiv))
 					nextFundingDisplay = fmt.Sprintf("%s (через %s)", nextTimeKyiv.Format("15:04 (02.01)"), durationToNext)
 				}
+
 				sb.WriteString(fmt.Sprintf(
 					"`%s` (%s, Mark: `$%.2f`)\n  Ставка: `%.4f%%`\n  Прогноз доходу на $100 Long до наст. виплати: `+$%.2f`\n  Наступна: %s\n",
 					info.Symbol, info.Exchange, info.MarkPrice, info.LastFundingRate, payoutPer100,
@@ -215,7 +220,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 	keyboard.ShowMainKeyboard(bot, chatID)
 }
 
-
+// HandleUpdate - основний обробник оновлень
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
@@ -294,7 +299,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			goal.HandleCallback(bot, update.CallbackQuery, srv, cfg) 
 			return 
 		}
-		if callbackResponseText != "" { // Тільки якщо є текст для відповіді на callback
+		if callbackResponseText != "" { 
 			answerCallbackCfg := tgbotapi.NewCallback(update.CallbackQuery.ID, callbackResponseText)
 			requestAndLog(bot, answerCallbackCfg, "answer_callback_other", chatID)
 		}
@@ -319,12 +324,11 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	
 	if currentState != StateDefault && isCommandOrButton && 
 	   !(currentState == StateAwaitingFundingThreshold && strings.HasPrefix(msgText, "/set_funding_threshold")) &&
-	   !(currentState == StateAwaitingFundingThreshold && msgText == keyboard.BtnSetFundingThreshold) {  // Дозволяємо кнопку, якщо в стані
+	   !(currentState == StateAwaitingFundingThreshold && msgText == keyboard.BtnSetFundingThreshold) {
 		log.Printf("Користувач %s в '%s', але надіслав команду/кнопку '%s'. Скидаємо стан.", userName, currentState, msgText)
 		SetUserState(chatID, StateDefault)
 		currentState = StateDefault 
 	}
-
 
 	switch currentState {
 	case StateAwaitingGoalInput:
@@ -338,7 +342,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
 	case StateAwaitingFundingThreshold:
-		// Якщо ми тут, значить це не команда /set_funding_threshold XYZ, а просто введення числа
 		thresholdStr := strings.TrimSpace(update.Message.Text)
 		threshold, err := strconv.ParseFloat(thresholdStr, 64)
 		if err != nil {
@@ -385,9 +388,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 				msg := tgbotapi.NewMessage(chatID, responseText)
 				msg.ParseMode = tgbotapi.ModeMarkdown
 				sendAndLog(bot, msg, "set_funding_threshold_cmd_success", chatID)
-				// Не показуємо клавіатуру тут, бо це пряма команда
 			}
-		} else { // Команда /set_funding_threshold без аргументу
+		} else { 
 			currentThreshold := GetUserFundingThreshold(chatID)
 			responseText := fmt.Sprintf("ℹ️ Поточний поріг для ставок фінансування: `%.4f%%`.\nЩоб встановити новий, введіть нове значення (наприклад, `0.01`):", currentThreshold)
 			msg := tgbotapi.NewMessage(chatID, responseText)
@@ -396,12 +398,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			SetUserState(chatID, StateAwaitingFundingThreshold)
 			log.Printf("Стан для ChatID %d -> %s (через команду /set_funding_threshold)", chatID, StateAwaitingFundingThreshold)
 		}
-		// Після обробки команди /set_funding_threshold, якщо це була команда,
-		// варто показати головну клавіатуру, якщо не перейшли в стан очікування.
-		// Або не показувати, якщо це була команда з аргументом і все успішно.
-		// Поточна логіка: якщо команда з аргументом, клавіатуру не показуємо. Якщо без - переходимо в стан.
-		// Якщо команда з аргументом і успішна, то клавіатуру ПОКАЗУЄМО.
-		if len(parts) == 2 { // Тільки якщо команда була з аргументом і оброблена
+		if len(parts) == 2 { 
 			keyboard.ShowMainKeyboard(bot, chatID)
 		}
 		return
@@ -503,17 +500,15 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnProgress, "/report":
 		ReportProgress(bot, update.Message, srv, cfg)
-	default: // Цей блок має бути в кінці функції HandleUpdate
+	default:
 		log.Printf("Не розпізнана команда або текст для ChatID %d: '%s'", chatID, msgText)
-		// Перевіряємо, щоб уникнути подвійного надсилання клавіатури, якщо вона вже була показана
-		// (наприклад, після обробки стану)
-		if GetUserState(chatID) == StateDefault { // Якщо ми не в якомусь стані, що очікує введення
+		if GetUserState(chatID) == StateDefault { 
 			unknownCmdMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Вибачте, команда або текст '%s' не оброблені. Скористайтеся кнопками меню.", msgText))
 			sendAndLog(bot, unknownCmdMsg, "unknown_input_or_command", chatID)
 			keyboard.ShowMainKeyboard(bot, chatID)
 		}
 	}
-} // <--- Це має бути ЗАКРИВАЮЧА ДУЖКА для функції HandleUpdate
+} // <--- ПЕРЕВІРЕНА ЗАКРИВАЮЧА ДУЖКА ДЛЯ HandleUpdate
 
 func formatDurationToNextFunding(d time.Duration) string {
 	isPast := false; if d < 0 { d = -d; isPast = true }
@@ -526,5 +521,3 @@ func formatDurationToNextFunding(d time.Duration) string {
 	if isPast { return fmt.Sprintf("-%dг %dхв (минув)", hours, minutes) }
 	return fmt.Sprintf("%dг %dхв", hours, minutes)
 }
-
-// monthNameUkrainian визначена в report.go
