@@ -5,6 +5,7 @@ import (
 	"log"
 )
 
+// Константи для текстів кнопок
 const (
 	BtnMyGoal              = "🎯 Моя ціль"
 	BtnProgress            = "📊 Прогрес"
@@ -15,19 +16,20 @@ const (
 	BtnCloseGoal           = "❌ Закрити ціль"
 	BtnAddInvestment       = "➕ Додати Інвестицію"
 	BtnSetFundingThreshold = "⚙️ Поріг Funding"
-	BtnSpreads             = "📈 Спреди"
+	BtnSpreads             = "📈 Спреди" // Нова кнопка для спредів
 )
 
+// Константи для CallbackData кнопок вибору біржі для фандингу
 const (
 	CallbackFundingBinance = "funding_binance"
 	CallbackFundingBybit   = "funding_bybit"
 	CallbackFundingOKX     = "funding_okx"
 	CallbackFundingMEXC    = "funding_mexc"
-	CallbackFundingBitget  = "funding_bitget" // ДОДАНО BITGET
+	CallbackFundingBitget  = "funding_bitget" 
 )
 
+// ShowMainKeyboard показує головну клавіатуру користувачу
 func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
-	// ... (код без змін, клавіатура та сама) ...
 	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnMyGoal),
@@ -58,7 +60,6 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 func CreateConfirmationKeyboard(yesCallbackData, noCallbackData string) tgbotapi.InlineKeyboardMarkup {
-	// ... (код без змін) ...
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("✅ Так", yesCallbackData),
@@ -77,7 +78,7 @@ func CreateFundingExchangeSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 		{"Bybit", CallbackFundingBybit},
 		{"OKX", CallbackFundingOKX},
 		{"MEXC", CallbackFundingMEXC},
-		{"Bitget", CallbackFundingBitget}, // ДОДАНО BITGET
+		{"Bitget", CallbackFundingBitget}, 
 	}
 
 	var rows [][]tgbotapi.InlineKeyboardButton
