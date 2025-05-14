@@ -12,7 +12,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bitget" // ДОДАНО ІМПОРТ BITGET
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bitget" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/mexc" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx" 
@@ -20,6 +20,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Закоментовано, якщо не використовується
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
@@ -29,7 +30,6 @@ const (
 	MaxTelegramMessageSize   = 4096 
 )
 
-// ... (sendAndLog, requestAndLog - без змін) ...
 func sendAndLog(bot *tgbotapi.BotAPI, c tgbotapi.Chattable, commandName string, chatID int64) {
 	if _, err := bot.Send(c); err != nil {
 		log.Printf("ПОМИЛКА надсилання (%s) для %d: %v", commandName, chatID, err)
@@ -72,7 +72,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		rates, err = okx.GetFundingRates()
 	case keyboard.CallbackFundingMEXC:
 		rates, err = mexc.GetFundingRates()
-	case keyboard.CallbackFundingBitget: // ДОДАНО BITGET
+	case keyboard.CallbackFundingBitget: 
 		rates, err = bitget.GetFundingRates()
 	default:
 		log.Printf("Невідомий callback для фандингу: %s", exchangeCallbackPrefix)
@@ -82,7 +82,6 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		return
 	}
 
-	// ... (решта функції handleFundingExchangeSelection без змін, як у відповіді #283) ...
 	currentFundingThreshold := GetUserFundingThreshold(chatID)
 	var reportText string
 
@@ -212,12 +211,11 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		case keyboard.CallbackFundingMEXC:
 			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "MEXC", keyboard.CallbackFundingMEXC)
 			return
-		case keyboard.CallbackFundingBitget: // ДОДАНО BITGET
+		case keyboard.CallbackFundingBitget: 
 			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "Bitget", keyboard.CallbackFundingBitget)
 			return
 		}
 
-		// ... (решта обробки callback-ів для CallbackConfirmCloseGoal, CallbackCancelCloseGoal, default - без змін) ...
 		var callbackResponseText string
 		originalMessageText := ""
 		if update.CallbackQuery.Message != nil {
@@ -257,8 +255,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		return
 	}
 
-	// ... (решта функції HandleUpdate, включаючи обробку станів, команди /set_funding_threshold, та основний switch для кнопок/команд - БЕЗ ЗМІН, ЯК У ВІДПОВІДІ #283) ...
-	// ... просто переконайтеся, що в цьому switch виклик для "/funding" та keyboard.BtnFundingRates тепер лише надсилає inline-клавіатуру:
 	if update.Message == nil {
 		return
 	}
@@ -346,7 +342,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		commands.StartWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case keyboard.BtnWorkStop, "/stop":
-		commands.StopWork(bot, update.Message, srv, cfg)
+		commands.StopWork(bot, update.Message, srv, cfg) // Мотивація викликається всередині StopWork
 		keyboard.ShowMainKeyboard(bot, chatID) 
 	case keyboard.BtnWorkDayOff, "/dayoff":
 		commands.DayOff(bot, update.Message, srv, cfg)
@@ -408,7 +404,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		SetUserState(chatID, StateAwaitingFundingThreshold)
 		log.Printf("Стан для ChatID %d -> %s (через кнопку)", chatID, StateAwaitingFundingThreshold)
 
-	case keyboard.BtnSpreads, "/spreads":
+	case keyboard.BtnSpreads, "/spreads": 
 		log.Printf("Обробка '%s' для ChatID %d.", msgText, chatID)
 		responseText := "📈 Функція моніторингу спредів наразі в розробці. Слідкуйте за оновленнями!"
 		msg := tgbotapi.NewMessage(chatID, responseText)
@@ -416,43 +412,4 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		keyboard.ShowMainKeyboard(bot, chatID)
 
 	case keyboard.BtnFundingRates, "/funding": 
-		log.Printf("Обробка команди /funding для ChatID: %d. Надсилання запиту вибору біржі.", chatID)
-		currentFundingThreshold := GetUserFundingThreshold(chatID) 
-		
-		introText := "📊 **Funding Rates**\n"
-		introText += fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold)
-		introText += "_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n"
-		introText += "Оберіть біржу для перегляду ставок:"
-
-		msg := tgbotapi.NewMessage(chatID, introText)
-		msg.ParseMode = tgbotapi.ModeMarkdown
-		msg.ReplyMarkup = keyboard.CreateFundingExchangeSelectionKeyboard() 
-		sendAndLog(bot, msg, "funding_exchange_select_prompt", chatID)
-		
-	case "/motivation": 
-		log.Printf("Обробка '/motivation' для ChatID %d", chatID)
-		msg := tgbotapi.NewMessage(chatID, "Функція мотивації тепер інтегрована після завершення робочого дня.")
-		sendAndLog(bot, msg, "motivation_info", chatID)
-		keyboard.ShowMainKeyboard(bot, chatID)
-
-	case keyboard.BtnProgress, "/report":
-		ReportProgress(bot, update.Message, srv, cfg)
-	default:
-		log.Printf("Не розпізнана команда або текст для ChatID %d: '%s'", chatID, msgText)
-		unknownCmdMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Вибачте, команда або текст '%s' не оброблені. Скористайтеся кнопками меню.", msgText))
-		sendAndLog(bot, unknownCmdMsg, "unknown_input_or_command", chatID)
-		keyboard.ShowMainKeyboard(bot, chatID)
-	}
-}
-
-func formatDurationToNextFunding(d time.Duration) string {
-	isPast := false; if d < 0 { d = -d; isPast = true }
-	hours := int(d.Hours()); minutes := int(d.Minutes()) % 60
-	if hours == 0 && minutes == 0 {
-		seconds := int(d.Seconds()) % 60
-		if isPast { return "0с (минув)" }
-		return fmt.Sprintf("%dс", seconds)
-	}
-	if isPast { return fmt.Sprintf("-%dг %dхв (минув)", hours, minutes) }
-	return fmt.Sprintf("%dг %dхв", hours, minutes)
-}
+		log.Printf("Обробка команди /funding для ChatID: %d. Над
