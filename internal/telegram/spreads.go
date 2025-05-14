@@ -1,22 +1,21 @@
 package telegram
 
 import (
-	"fmt" // Залишимо для fmt.Sprintf у майбутньому
+	"fmt"
 	"log"
-	// "sort"    // Тимчасово не потрібен
-	// "strconv" // Тимчасово не потрібен
-	// "strings" // Тимчасово не потрібен
-	// "sync"    // Тимчасово не потрібен
-	"time" // Залишимо для time.Sleep у майбутньому
+	"sort"
+	// "strconv" // Залишайте, ЯКЩО використовуєте для конвертації рядків в числа
+	"strings" // ПОВЕРНУЛИ ІМПОРТ STRINGS
+	// "sync"    // Поки що не використовуємо горутини тут
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	// Ключовий імпорт, який ми тестуємо:
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard" // Поки не використовується
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
 
-// SpreadOpportunity ... (залишаємо структуру, вона не має викликати помилок)
+// SpreadOpportunity ... (без змін)
 type SpreadOpportunity struct {
 	CoinID         string
 	BaseCurrency   string
@@ -34,7 +33,7 @@ type SpreadOpportunity struct {
 	Category       int
 }
 
-// isUserExchange ... (залишаємо, не має викликати помилок)
+// isUserExchange ... (використовує strings)
 func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
 	for _, ue := range userExchanges {
@@ -44,7 +43,8 @@ func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	}
 	return false
 }
-// checkTrustScore ... (залишаємо, не має викликати помилок)
+
+// checkTrustScore ... (використовує strings)
 func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
 		return true
@@ -64,7 +64,7 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 		return true
 	}
 }
-// classifySpread ... (залишаємо, не має викликати помилок)
+// classifySpread ... (використовує strings)
 func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
 	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
 	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
@@ -76,7 +76,7 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 			strings.ToUpper(ticker.Target) == "USDT" &&
 			userExchangesMap[strings.ToLower(ticker.Market.Identifier)] &&
 			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeBuyID) &&
-			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeSellID) {
+			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeSellID) { 
 			tokenOnUserOtherExchange = true
 			userExchangeWithToken = ticker.Market.Name
 			break
@@ -88,9 +88,9 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 	}
 	if buyIsUser {
 		if tokenOnUserOtherExchange {
-			return fmt.Sprintf("ℹ️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeSellID, userExchangeWithToken), 2
+			return fmt.Sprintf("ℹ️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeSellID, userExchangeWithToken), 2 
 		}
-		return fmt.Sprintf("⚠️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeSellID), 2
+		return fmt.Sprintf("⚠️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeSellID), 2 
 	}
 	if sellIsUser {
 		if tokenOnUserOtherExchange {
@@ -107,40 +107,31 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config) {
 	// ---- ДІАГНОСТИКА ТИПУ ----
-	var testVar coingecko.CoinMarketData // Оголошуємо змінну типу coingecko.CoinMarketData
-	log.Printf("Спреди: Тестове оголошення coingecko.CoinMarketData.ID: %s (це для діагностики)", testVar.ID)
+	// Спробуємо просто викликати функцію з пакету coingecko, яка повертає []coingecko.CoinMarketData
+	var testVar []coingecko.CoinMarketData // Оголошуємо зріз типу, який повертає функція
+	testVar, testErr := coingecko.GetTopMarketCapCoins(1, "usd") 
+	if testErr != nil {
+		log.Printf("Спреди: ДІАГНОСТИКА: Помилка при виклику GetTopMarketCapCoins: %v", testErr)
+	} else {
+		if len(testVar) > 0 {
+			log.Printf("Спреди: ДІАГНОСТИКА: GetTopMarketCapCoins викликано успішно. Перша монета ID: %s", testVar[0].ID)
+		} else {
+			log.Printf("Спреди: ДІАГНОСТИКА: GetTopMarketCapCoins викликано успішно, але список порожній.")
+		}
+	}
 	// ---- КІНЕЦЬ ДІАГНОСТИКИ ----
 
 	// Поки що весь інший код функції закоментовано для ізоляції проблеми
 	/*
 		loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час, будь ласка, зачекайте.")
-		sentMsg, errSendLoad := bot.Send(loadingMsg)
-		var originalMessageID int
-		if errSendLoad == nil && sentMsg.MessageID != 0 {
-			originalMessageID = sentMsg.MessageID
-		} else {
-			log.Printf("Спреди: Помилка надсилання повідомлення 'Пошук спредів': %v", errSendLoad)
-		}
-
-		log.Printf("Спреди: Початок пошуку. Топ монет: %d, Мін. спред: %.2f%%, Біржі користувача: %v, Мін. Trust Score: '%s'",
-			cfg.SpreadCoinCount, cfg.SpreadMinPercentage, cfg.SpreadUserExchanges, cfg.SpreadMinTrustScore)
-
-		topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
-		if err != nil {
-			// ... (обробка помилки) ...
-			return
-		}
-		// ... (решта логіки) ...
+		// ... (решта закоментованого коду) ...
 	*/
 
-	// Поки що просто надсилаємо повідомлення, що функція викликана
 	diagnosticMsg := tgbotapi.NewMessage(chatID, "Функція HandleSpreadsCommand викликана. Діагностика типу coingecko.CoinMarketData виконана (дивіться логи сервера).")
 	sendAndLog(bot, diagnosticMsg, "spreads_command_called_diag", chatID)
-	// keyboard.ShowMainKeyboard(bot, chatID) // Поки що не показуємо, щоб не заважати
 }
 
-// min функція не використовується, якщо не використовується логіка вище
-// func min(a, b int) int {
-// 	if a < b { return a }
-// 	return b
-// }
+func min(a, b int) int {
+	if a < b { return a }
+	return b
+}
