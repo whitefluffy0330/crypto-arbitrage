@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time" // Потрібен для time.ParseDuration
 )
 
 // Config зберігає всі конфігураційні параметри
