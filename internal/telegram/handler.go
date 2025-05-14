@@ -20,7 +20,6 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/commands"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/goal"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Закоментовано, якщо не використовується
 	gsheets "google.golang.org/api/sheets/v4"
 )
 
@@ -190,7 +189,6 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 	keyboard.ShowMainKeyboard(bot, chatID)
 }
 
-
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
@@ -342,7 +340,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		commands.StartWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
 	case keyboard.BtnWorkStop, "/stop":
-		commands.StopWork(bot, update.Message, srv, cfg) // Мотивація викликається всередині StopWork
+		commands.StopWork(bot, update.Message, srv, cfg) 
 		keyboard.ShowMainKeyboard(bot, chatID) 
 	case keyboard.BtnWorkDayOff, "/dayoff":
 		commands.DayOff(bot, update.Message, srv, cfg)
@@ -412,4 +410,43 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		keyboard.ShowMainKeyboard(bot, chatID)
 
 	case keyboard.BtnFundingRates, "/funding": 
-		log.Printf("Обробка команди /funding для ChatID: %d. Над
+		log.Printf("Обробка команди /funding для ChatID: %d. Надсилання запиту вибору біржі.", chatID)
+		currentFundingThreshold := GetUserFundingThreshold(chatID) 
+		
+		introText := "📊 **Funding Rates**\n"
+		introText += fmt.Sprintf("_Поточний поріг відображення: `%.4f%%`._\n", currentFundingThreshold)
+		introText += "_Ставки фінансування – це періодичні платежі між трейдерами. Прогнозований дохід/витрати розраховуються на один період фінансування (зазвичай 8 годин) і не враховують торгові комісії._\n\n"
+		introText += "Оберіть біржу для перегляду ставок:"
+
+		msg := tgbotapi.NewMessage(chatID, introText)
+		msg.ParseMode = tgbotapi.ModeMarkdown
+		msg.ReplyMarkup = keyboard.CreateFundingExchangeSelectionKeyboard() 
+		sendAndLog(bot, msg, "funding_exchange_select_prompt", chatID)
+		
+	case "/motivation": 
+		log.Printf("Обробка '/motivation' для ChatID %d", chatID)
+		msg := tgbotapi.NewMessage(chatID, "Функція мотивації тепер інтегрована після завершення робочого дня.")
+		sendAndLog(bot, msg, "motivation_info", chatID)
+		keyboard.ShowMainKeyboard(bot, chatID)
+
+	case keyboard.BtnProgress, "/report":
+		ReportProgress(bot, update.Message, srv, cfg)
+	default:
+		log.Printf("Не розпізнана команда або текст для ChatID %d: '%s'", chatID, msgText)
+		unknownCmdMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Вибачте, команда або текст '%s' не оброблені. Скористайтеся кнопками меню.", msgText))
+		sendAndLog(bot, unknownCmdMsg, "unknown_input_or_command", chatID)
+		keyboard.ShowMainKeyboard(bot, chatID)
+	}
+}
+
+func formatDurationToNextFunding(d time.Duration) string {
+	isPast := false; if d < 0 { d = -d; isPast = true }
+	hours := int(d.Hours()); minutes := int(d.Minutes()) % 60
+	if hours == 0 && minutes == 0 {
+		seconds := int(d.Seconds()) % 60
+		if isPast { return "0с (минув)" }
+		return fmt.Sprintf("%dс", seconds)
+	}
+	if isPast { return fmt.Sprintf("-%dг %dхв (минув)", hours, minutes) }
+	return fmt.Sprintf("%dг %dхв", hours, minutes)
+}
