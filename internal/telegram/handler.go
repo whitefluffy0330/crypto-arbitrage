@@ -12,6 +12,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/binance"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bitget" // ДОДАНО ІМПОРТ BITGET
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/bybit" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/mexc" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/okx" 
@@ -28,6 +29,7 @@ const (
 	MaxTelegramMessageSize   = 4096 
 )
 
+// ... (sendAndLog, requestAndLog - без змін) ...
 func sendAndLog(bot *tgbotapi.BotAPI, c tgbotapi.Chattable, commandName string, chatID int64) {
 	if _, err := bot.Send(c); err != nil {
 		log.Printf("ПОМИЛКА надсилання (%s) для %d: %v", commandName, chatID, err)
@@ -70,6 +72,8 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		rates, err = okx.GetFundingRates()
 	case keyboard.CallbackFundingMEXC:
 		rates, err = mexc.GetFundingRates()
+	case keyboard.CallbackFundingBitget: // ДОДАНО BITGET
+		rates, err = bitget.GetFundingRates()
 	default:
 		log.Printf("Невідомий callback для фандингу: %s", exchangeCallbackPrefix)
 		errorText := fmt.Sprintf("Помилка: невідома біржа для запиту (%s).", exchangeName)
@@ -78,6 +82,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 		return
 	}
 
+	// ... (решта функції handleFundingExchangeSelection без змін, як у відповіді #283) ...
 	currentFundingThreshold := GetUserFundingThreshold(chatID)
 	var reportText string
 
@@ -113,7 +118,6 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 				profitPer100 := 100 * (info.LastFundingRate / 100.0)
 				
 				var nextFundingDisplay string
-				// ВИПРАВЛЕННЯ для часу MEXC та інших бірж, якщо час нульовий/невалідний
 				if info.NextFundingTime.IsZero() || info.NextFundingTime.Unix() <= 0 {
 					nextFundingDisplay = "N/A"
 				} else {
@@ -151,7 +155,6 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 				payoutPer100 := 100 * (-info.LastFundingRate / 100.0)
 				
 				var nextFundingDisplay string
-				// ВИПРАВЛЕННЯ для часу MEXC та інших бірж, якщо час нульовий/невалідний
 				if info.NextFundingTime.IsZero() || info.NextFundingTime.Unix() <= 0 {
 					nextFundingDisplay = "N/A"
 				} else {
@@ -209,8 +212,12 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		case keyboard.CallbackFundingMEXC:
 			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "MEXC", keyboard.CallbackFundingMEXC)
 			return
+		case keyboard.CallbackFundingBitget: // ДОДАНО BITGET
+			handleFundingExchangeSelection(bot, update.CallbackQuery, chatID, "Bitget", keyboard.CallbackFundingBitget)
+			return
 		}
 
+		// ... (решта обробки callback-ів для CallbackConfirmCloseGoal, CallbackCancelCloseGoal, default - без змін) ...
 		var callbackResponseText string
 		originalMessageText := ""
 		if update.CallbackQuery.Message != nil {
@@ -250,6 +257,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		return
 	}
 
+	// ... (решта функції HandleUpdate, включаючи обробку станів, команди /set_funding_threshold, та основний switch для кнопок/команд - БЕЗ ЗМІН, ЯК У ВІДПОВІДІ #283) ...
+	// ... просто переконайтеся, що в цьому switch виклик для "/funding" та keyboard.BtnFundingRates тепер лише надсилає inline-клавіатуру:
 	if update.Message == nil {
 		return
 	}
