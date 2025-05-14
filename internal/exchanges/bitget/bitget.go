@@ -16,28 +16,28 @@ import (
 
 const (
 	bitgetAPIEndpointBase = "https://api.bitget.com"
-	// Використовуємо API v2 для ф'ючерсів
-	tickersPathV2   = "/api/v2/mix/market/tickers"
-	productTypeUSDT = "USDT-FUTURES" // Або "umcbl" - потрібно перевірити точне значення для USDT Perpetual
-	topNByVolume    = 75             // Обмеження для обробки за обсягом
+	tickersPathV2         = "/api/v2/mix/market/tickers"
+	productTypeUSDT       = "USDT-FUTURES" // Може бути "umcbl" або "USDT-PERPETUAL" - треба уточнити в док. Bitget
+	topNByVolume          = 75
 )
 
 // BitgetTickerV2 містить поля, які нас цікавлять з відповіді API /v2/mix/market/tickers
 type BitgetTickerV2 struct {
-	Symbol          string `json:"symbol"`          // Наприклад, BTCUSDT
-	MarkPrice       string `json:"markPrice"`       // Ціна маркування
-	FundingRate     string `json:"fundingRate"`     // Поточна ставка фінансування (десяткове число)
+	Symbol          string `json:"symbol"`      // Наприклад, BTCUSDT (Bitget зазвичай використовує формат без "_")
+	MarkPrice       string `json:"markPrice"`   // Ціна маркування
+	FundingRate     string `json:"fundingRate"` // Поточна ставка фінансування (десяткове число)
 	NextFundingTime string `json:"nextFundingTime"` // Час наступного фінансування (Unix ms)
-	QuoteVolume     string `json:"quoteVolume"`     // Обсяг торгів за 24 години в котирувальній валюті (USDT)
-	// Можуть бути й інші корисні поля: lastPr, indexPrice, openInterestValue
+	QuoteVolume     string `json:"quoteVolume"` // Обсяг торгів за 24 години в котирувальній валюті (USDT)
+	// Додаткові поля, які можуть бути корисними або для перевірки
+	LastPrice       string `json:"lastPr"`      // Остання ціна
+	IndexPrice      string `json:"indexPrice"`  // Ціна індексу
 }
 
-// BitgetAPIResponseV2 структура для загальної відповіді API (якщо є обгортка)
-// Bitget V2 часто повертає { "code": "00000", "msg": "success", "requestTime": ..., "data": [...] }
+// BitgetAPIResponseV2 структура для загальної відповіді API
 type BitgetAPIResponseV2 struct {
-	Code        string           `json:"code"` // "00000" означає успіх
-	Msg         string           `json:"msg"`
-	RequestTime int64            `json:"requestTime"`
+	Code        string            `json:"code"` // "00000" означає успіх
+	Msg         string            `json:"msg"`
+	RequestTime int64             `json:"requestTime"`
 	Data        []BitgetTickerV2 `json:"data"`
 }
 
@@ -45,11 +45,10 @@ type BitgetAPIResponseV2 struct {
 func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	log.Println("Bitget: Початок отримання даних про ставки фінансування...")
 
-	// Формуємо URL з параметром productType
 	url := fmt.Sprintf("%s%s?productType=%s", bitgetAPIEndpointBase, tickersPathV2, productTypeUSDT)
 	log.Printf("Bitget: Запит до API: %s", url)
 
-	client := http.Client{Timeout: 15 * time.Second}
+	client := http.Client{Timeout: 20 * time.Second} // Збільшено таймаут
 	resp, err := client.Get(url)
 	if err != nil {
 		log.Printf("Bitget: Помилка HTTP GET запиту (%s): %v", url, err)
@@ -74,7 +73,7 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 		return nil, fmt.Errorf("розбір JSON відповіді від Bitget: %w", err)
 	}
 
-	if apiResponse.Code != "00000" { // "00000" означає успіх для Bitget API v2
+	if apiResponse.Code != "00000" {
 		log.Printf("Bitget: API повернуло помилку: Code=%s, Msg=%s", apiResponse.Code, apiResponse.Msg)
 		return nil, fmt.Errorf("API Bitget повернуло помилку: %s (код %s)", apiResponse.Msg, apiResponse.Code)
 	}
@@ -86,42 +85,60 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 
 	log.Printf("Bitget: Отримано %d тікерів.", len(apiResponse.Data))
 
-	// Фільтруємо та сортуємо за обсягом
 	var usdtSwapTickers []BitgetTickerV2
 	for _, ticker := range apiResponse.Data {
 		// Bitget символи для USDT-M зазвичай мають суфікс USDT (напр. BTCUSDT)
 		// І productType вже має бути USDT-FUTURES (або аналог)
-		// Додатково перевіримо, чи є обсяг
-		if strings.HasSuffix(ticker.Symbol, "USDT") && ticker.QuoteVolume != "" { // Bitget використовує "USDT" в кінці для USDT-M
+		// Додатково перевіримо, чи є обсяг та чи символ закінчується на USDT
+		// Деякі символи можуть бути, наприклад, BTCUSD_PERP, а не BTCUSDT
+		// Для Bitget, USDT-M зазвичай мають "USDT" в кінці, наприклад, "BTCUSDT", "ETHUSDT"
+		// Іноді Bitget може повертати символи типу "BTCUSDT_UMCBL" - перевіримо документацію або сиру відповідь
+		// Якщо productType=USDT-FUTURES, то всі символи мають бути релевантними USDT-M.
+		// Головне - перевірити наявність QuoteVolume
+		if ticker.QuoteVolume != "" && strings.HasSuffix(ticker.Symbol, "USDT") { // Додамо перевірку на суфікс USDT для надійності
 			usdtSwapTickers = append(usdtSwapTickers, ticker)
 		}
 	}
+	log.Printf("Bitget: Відфільтровано %d USDT тікерів з обсягом.", len(usdtSwapTickers))
+
 
 	sort.SliceStable(usdtSwapTickers, func(i, j int) bool {
 		volI, _ := strconv.ParseFloat(usdtSwapTickers[i].QuoteVolume, 64)
 		volJ, _ := strconv.ParseFloat(usdtSwapTickers[j].QuoteVolume, 64)
-		return volI > volJ // Сортування за спаданням обсягу
+		return volI > volJ 
 	})
 
 	var symbolsToProcess []BitgetTickerV2
 	if len(usdtSwapTickers) > topNByVolume {
-		log.Printf("Bitget: Обмежуємо обробку до топ-%d з %d знайдених USDT-SWAP тікерів за обсягом.", topNByVolume, len(usdtSwapTickers))
+		log.Printf("Bitget: Обмежуємо обробку до топ-%d з %d знайдених USDT тікерів за обсягом.", topNByVolume, len(usdtSwapTickers))
 		symbolsToProcess = usdtSwapTickers[:topNByVolume]
 	} else {
-		log.Printf("Bitget: Знайдено %d USDT-SWAP тікерів для обробки.", len(usdtSwapTickers))
+		log.Printf("Bitget: Знайдено %d USDT тікерів для обробки (менше або дорівнює ліміту %d).", len(usdtSwapTickers), topNByVolume)
 		symbolsToProcess = usdtSwapTickers
 	}
 
 	if len(symbolsToProcess) == 0 {
-		log.Println("Bitget: Не знайдено USDT-SWAP інструментів для запиту ставок фандингу після фільтрації.")
+		log.Println("Bitget: Не знайдено USDT тікерів для запиту ставок фінансування після фільтрації.")
 		return []exchanges.UnifiedFundingRateInfo{}, nil
 	}
 
 	var fundingData []exchanges.UnifiedFundingRateInfo
+	logCounter := 0 
 	for _, item := range symbolsToProcess {
-		// Перевіряємо, чи є необхідні поля, перш ніж парсити
-		if item.MarkPrice == "" || item.FundingRate == "" || item.NextFundingTime == "" {
-			// log.Printf("Bitget: Пропуск символу %s через порожні поля (MarkPrice: '%s', FundingRate: '%s', NextFundingTime: '%s')", item.Symbol, item.MarkPrice, item.FundingRate, item.NextFundingTime)
+		// ---- ТИМЧАСОВИЙ ЛОГ ДЛЯ ДІАГНОСТИКИ BITGET ----
+		if logCounter < 10 { // Логуємо перші 10 тікерів, що йдуть на обробку
+			log.Printf("Bitget_DEBUG: Обробка тікера: Symbol=%s, MarkPrice='%s', FundingRate='%s', NextFundingTime='%s', QuoteVolume='%s', LastPrice='%s', IndexPrice='%s'", 
+				item.Symbol, item.MarkPrice, item.FundingRate, item.NextFundingTime, item.QuoteVolume, item.LastPrice, item.IndexPrice)
+			logCounter++
+		}
+		// ---- КІНЕЦЬ ТИМЧАСОВОГО ЛОГУ ----
+
+		if item.MarkPrice == "" || item.FundingRate == "" || item.NextFundingTime == "" || item.MarkPrice == "0" || item.FundingRate == "0" && item.NextFundingTime == "0" {
+			// Додамо більш детальне логування пропуску
+			// if logCounter < 20 { // Логуємо ще трохи пропусків
+			// 	log.Printf("Bitget_DEBUG: Пропуск символу %s через порожні або нульові критичні поля (MarkPrice: '%s', FundingRate: '%s', NextFundingTime: '%s')", item.Symbol, item.MarkPrice, item.FundingRate, item.NextFundingTime)
+			// 	logCounter++
+			// }
 			continue
 		}
 
@@ -136,17 +153,18 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 			// log.Printf("Bitget: Помилка парсингу FundingRate для %s ('%s'): %v. Пропускаємо.", item.Symbol, item.FundingRate, errFR)
 			continue
 		}
-		fundingRatePercent := fundingRateRaw * 100 // Конвертуємо у відсотки
+		fundingRatePercent := fundingRateRaw * 100
 
 		nextFundingTimeMs, errNFT := strconv.ParseInt(item.NextFundingTime, 10, 64)
 		if errNFT != nil {
 			// log.Printf("Bitget: Помилка парсингу NextFundingTime для %s ('%s'): %v. Пропускаємо.", item.Symbol, item.NextFundingTime, errNFT)
 			continue
 		}
+		// Якщо NextFundingTimeMs == 0, це може бути проблемою, але time.Unix(0,0) дасть 1970-01-01
+		// Обробка "N/A" для невалідного часу вже є в handler.go
 		nextFundingTime := time.Unix(0, nextFundingTimeMs*int64(time.Millisecond)).UTC()
-
-		// Bitget символи вже у форматі BTCUSDT
-		symbolClean := item.Symbol
+		
+		symbolClean := item.Symbol // Bitget символи вже у форматі BTCUSDT
 
 		fundingData = append(fundingData, exchanges.UnifiedFundingRateInfo{
 			Exchange:        "Bitget",
@@ -161,7 +179,6 @@ func GetFundingRates() ([]exchanges.UnifiedFundingRateInfo, error) {
 	return fundingData, nil
 }
 
-// Допоміжна функція min
 func min(a, b int) int {
 	if a < b {
 		return a
