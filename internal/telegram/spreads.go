@@ -4,16 +4,37 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	// "strconv" // Перевірте, чи він дійсно не потрібен, і видаліть, якщо так
+	// "strconv" // Перевірте, чи він потрібен, якщо ні - видаліть
 	"strings"
-	"sync" // Залишаємо для mu, хоча горутин поки немає
+	// "sync" // Тимчасово видалено, бо горутини закоментовані
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko" // Імпорт
+	// Ми все ще імпортуємо coingecko для GetTopMarketCapCoins та GetCoinTickers
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
+
+// ---- ТИМЧАСОВЕ ВИЗНАЧЕННЯ СТРУКТУРИ ДЛЯ ДІАГНОСТИКИ ----
+// Якщо код скомпілюється з цим, значить проблема в тому, як spreads.go бачить
+// coingecko.CoinMarketData з іншого пакету.
+// В ідеалі, це визначення має бути тільки в coingecko.go
+type CoinMarketData_LocalTest struct {
+	ID             string  `json:"id"`
+	Symbol         string  `json:"symbol"`
+	Name           string  `json:"name"`
+	Image          string  `json:"image"`
+	CurrentPrice   float64 `json:"current_price"`
+	MarketCap      int64   `json:"market_cap"` // Змінено на int64 згідно з coingecko.go
+	MarketCapRank  int     `json:"market_cap_rank"`
+	TotalVolume    float64 `json:"total_volume"`
+	High24h        float64 `json:"high_24h"`
+	Low24h         float64 `json:"low_24h"`
+	PriceChange24h float64 `json:"price_change_24h"`
+}
+// ---- КІНЕЦЬ ТИМЧАСОВОГО ВИЗНАЧЕННЯ ----
+
 
 // SpreadOpportunity ... (без змін)
 type SpreadOpportunity struct {
@@ -104,10 +125,12 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 	return fmt.Sprintf("🚫 Спред між '%s' та '%s' (не ваші). Токена немає на ваших біржах.", exchangeBuyID, exchangeSellID), 4
 }
 
+
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config) {
 	// ---- ДІАГНОСТИКА ТИПУ ----
-	var testVar coingecko.CoinMarketData // Оголошуємо змінну цього типу
-	log.Printf("Спреди: Тестове оголошення coingecko.CoinMarketData.ID: %s", testVar.ID) // Використовуємо поле
+	// Замість coingecko.CoinMarketData використаємо локальне визначення
+	var testCoinData CoinMarketData_LocalTest // ВИКОРИСТОВУЄМО ЛОКАЛЬНИЙ ТИП
+	log.Printf("Спреди: Тестове оголошення CoinMarketData_LocalTest.ID: %s", testCoinData.ID)
 	// ---- КІНЕЦЬ ДІАГНОСТИКИ ----
 
 	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час, будь ласка, зачекайте.")
@@ -122,8 +145,14 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	log.Printf("Спреди: Початок пошуку. Топ монет: %d, Мін. спред: %.2f%%, Біржі користувача: %v, Мін. Trust Score: '%s'",
 		cfg.SpreadCoinCount, cfg.SpreadMinPercentage, cfg.SpreadUserExchanges, cfg.SpreadMinTrustScore)
 
-	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
+	// GetTopMarketCapCoins повертає []coingecko.CoinMarketData
+	// Ми не можемо просто присвоїти його []CoinMarketData_LocalTest
+	// Тому цей діагностичний крок треба буде адаптувати, якщо компіляція пройде з локальним типом.
+	// Поки що залишимо так, щоб перевірити, чи сам тип coingecko.CoinMarketData розпізнається.
+	
+	topCoinsCG, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
 	if err != nil {
+		// ... (обробка помилки як раніше) ...
 		log.Printf("Спреди: Помилка отримання топ монет: %v", err)
 		errorText := fmt.Sprintf("Помилка отримання списку топ-монет: %v", err)
 		if originalMessageID != 0 {
@@ -135,7 +164,12 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
 	}
-	log.Printf("Спреди: Отримано %d монет для аналізу.", len(topCoins))
+	log.Printf("Спреди: Отримано %d монет для аналізу.", len(topCoinsCG))
+
+	// Конвертація []coingecko.CoinMarketData в []CoinMarketData_LocalTest (якщо типи сумісні за полями)
+	// Цей крок потрібен, якщо ми використовуємо CoinMarketData_LocalTest далі
+	// АЛЕ ЗАРАЗ НАША МЕТА - ПЕРЕВІРИТИ, ЧИ КОМПІЛЮЄТЬСЯ З coingecko.CoinMarketData
+	// ТОМУ ПОКИ ЩО ЗАЛИШИМО РОБОТУ З topCoinsCG типу []coingecko.CoinMarketData
 
 	var allFoundSpreads []SpreadOpportunity
 	userExchangesMap := make(map[string]bool)
@@ -144,14 +178,14 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	}
 
 	processedCoins := 0
-	// var mu sync.Mutex // Поки що не потрібен, бо немає горутин
-	// var wg sync.WaitGroup // Поки що не потрібен
+	// var mu sync.Mutex // Поки що без горутин
+	// var wg sync.WaitGroup // Поки що без горутин
 
-	// ТИМЧАСОВО: Обробка без горутин для діагностики
-	for _, currentCoin := range topCoins { // currentCoin тут має тип coingecko.CoinMarketData
+
+	for _, currentCoin := range topCoinsCG { // Використовуємо topCoinsCG, який має тип []coingecko.CoinMarketData
 		processedCoins++
 		if originalMessageID != 0 && processedCoins%5 == 0 {
-			progressText := fmt.Sprintf("⏳ Пошук спредів... Оброблено %d з %d монет (%s)...", processedCoins, len(topCoins), currentCoin.Name)
+			progressText := fmt.Sprintf("⏳ Пошук спредів... Оброблено %d з %d монет (%s)...", processedCoins, len(topCoinsCG), currentCoin.Name)
 			editProgressMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, progressText)
 			_, _ = bot.Send(editProgressMsg)
 		}
@@ -186,7 +220,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 		}
 
 		if len(validTickers) < 2 {
-			continue // Змінено з return на continue, щоб продовжити з наступною монетою
+			continue
 		}
 
 		for i := 0; i < len(validTickers); i++ {
@@ -239,16 +273,14 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 						Comment:        comment,
 						Category:       category,
 					}
-					// mu.Lock() // Не потрібен, бо немає горутин
 					allFoundSpreads = append(allFoundSpreads, op)
-					// mu.Unlock()
 				}
 			}
 		}
 		time.Sleep(1500 * time.Millisecond)
 	}
-	// wg.Wait() // Не потрібен, бо немає горутин
 
+	// ... (решта коду сортування та відображення без змін) ...
 	sort.SliceStable(allFoundSpreads, func(i, j int) bool {
 		if allFoundSpreads[i].Category != allFoundSpreads[j].Category {
 			return allFoundSpreads[i].Category < allFoundSpreads[j].Category
