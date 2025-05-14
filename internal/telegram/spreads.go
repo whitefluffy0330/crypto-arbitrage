@@ -3,18 +3,18 @@ package telegram
 import (
 	"fmt"
 	"log"
-	// "sort"    // Поки що не використовується, бо основна логіка закоментована
+	// "sort"    // Тимчасово видалено
 	"strings"
-	// "sync" // Поки що не використовується
-	"time" // Поки що не використовується, але може знадобитися
+	// "sync"    // Тимчасово видалено
+	// "time" // Тимчасово видалено
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard" // Поки не використовується
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard" // Тимчасово видалено
 )
 
-// SpreadOpportunity ... (структура без змін)
+// SpreadOpportunity ... (без змін)
 type SpreadOpportunity struct {
 	CoinID         string
 	BaseCurrency   string
@@ -32,7 +32,7 @@ type SpreadOpportunity struct {
 	Category       int
 }
 
-// isUserExchange ... (функція без змін)
+// isUserExchange ... (без змін)
 func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
 	for _, ue := range userExchanges {
@@ -42,7 +42,7 @@ func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	}
 	return false
 }
-// checkTrustScore ... (функція без змін)
+// checkTrustScore ... (без змін)
 func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
 		return true
@@ -62,7 +62,7 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 		return true
 	}
 }
-// classifySpread ... (функція без змін)
+// classifySpread ... (без змін)
 func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
 	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
 	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
@@ -74,7 +74,7 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 			strings.ToUpper(ticker.Target) == "USDT" &&
 			userExchangesMap[strings.ToLower(ticker.Market.Identifier)] &&
 			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeBuyID) &&
-			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeSellID) {
+			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeSellID) { 
 			tokenOnUserOtherExchange = true
 			userExchangeWithToken = ticker.Market.Name
 			break
@@ -86,9 +86,9 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 	}
 	if buyIsUser {
 		if tokenOnUserOtherExchange {
-			return fmt.Sprintf("ℹ️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeSellID, userExchangeWithToken), 2
+			return fmt.Sprintf("ℹ️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeSellID, userExchangeWithToken), 2 
 		}
-		return fmt.Sprintf("⚠️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeSellID), 2
+		return fmt.Sprintf("⚠️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeSellID), 2 
 	}
 	if sellIsUser {
 		if tokenOnUserOtherExchange {
@@ -104,8 +104,7 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config) {
 	// ---- ДІАГНОСТИКА ТИПУ ----
-	// Тепер використовуємо правильний тип coingecko.MarketCoin
-	var testVar []coingecko.MarketCoin 
+	var testVar []coingecko.CoinMarketData // Тепер використовуємо правильний тип CoinMarketData
 	testVar, testErr := coingecko.GetTopMarketCapCoins(1, "usd")
 	if testErr != nil {
 		log.Printf("Спреди: ДІАГНОСТИКА: Помилка при виклику GetTopMarketCapCoins: %v", testErr)
@@ -117,12 +116,10 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 		}
 	}
 	// ---- КІНЕЦЬ ДІАГНОСТИКИ ----
-
-	// Поки що весь інший код функції закоментовано для ізоляції проблеми компіляції
 	
-	diagnosticMsg := tgbotapi.NewMessage(chatID, "Функція HandleSpreadsCommand викликана. Діагностика типу з пакету coingecko виконана (дивіться логи сервера).")
+	diagnosticMsg := tgbotapi.NewMessage(chatID, "Функція HandleSpreadsCommand викликана. Діагностика типу coingecko.CoinMarketData виконана (дивіться логи сервера).")
 	sendAndLog(bot, diagnosticMsg, "spreads_command_called_diag", chatID)
-	// keyboard.ShowMainKeyboard(bot, chatID) // Поки не показуємо, щоб не заважати діагностиці
+	// keyboard.ShowMainKeyboard(bot, chatID) // Поки не показуємо
 }
 
 // min функція не використовується, якщо не використовується логіка вище
