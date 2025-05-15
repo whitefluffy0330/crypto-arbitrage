@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	// "strconv" // ВИДАЛЕНО, якщо не використовується в checkTrustScore для числових значень
+	// "strconv" // Якщо не використовується
 	"strings"
 	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.comcom/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
 
-// SpreadOpportunity зберігає інформацію про знайдений спред
+// ... (структури SpreadOpportunity, isUserExchange, checkTrustScore, classifySpread - без змін) ...
 type SpreadOpportunity struct {
 	CoinID          string
 	BaseCurrency    string
@@ -25,7 +25,7 @@ type SpreadOpportunity struct {
 	SellExchange    string
 	SellPriceUSD    float64
 	SpreadPercent   float64
-	ProfitPer100USD float64 // ДОДАНО: Прибуток на $100 інвестиції
+	ProfitPer100USD float64 
 	TrustScoreBuy   string
 	TrustScoreSell  string
 	TradeURLBuy     string
@@ -34,7 +34,6 @@ type SpreadOpportunity struct {
 	Category        int
 }
 
-// isUserExchange ... (функція без змін)
 func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
 	for _, ue := range userExchanges {
@@ -45,7 +44,6 @@ func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	return false
 }
 
-// checkTrustScore ... (функція без змін)
 func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
 		return true
@@ -65,8 +63,6 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 		return true
 	}
 }
-
-// classifySpread ... (функція без змін)
 func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
 	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
 	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
@@ -106,8 +102,9 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 	return fmt.Sprintf("🚫 Спред між '%s' та '%s' (не ваші). Токена немає на ваших біржах.", exchangeBuyID, exchangeSellID), 4
 }
 
+
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config) {
-	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час, будь ласка, зачекайте.")
+	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час (до кількох хвилин), будь ласка, зачекайте.")
 	sentMsg, errSendLoad := bot.Send(loadingMsg)
 	var originalMessageID int
 	if errSendLoad == nil && sentMsg.MessageID != 0 {
@@ -121,14 +118,13 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 
 	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
 	if err != nil {
-		// ВИПРАВЛЕНО: оголошуємо errorText перед використанням
-		var errorText string = fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
+		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
 		if strings.Contains(err.Error(), "429") {
-			errorText += "\n\n🚫 Схоже, ми досягли ліміту запитів до CoinGecko API. Спробуйте пізніше."
+			errorMsg += "\n\n🚫 Схоже, ми досягли ліміту запитів до CoinGecko API. Спробуйте пізніше."
 		}
-		log.Printf("Спреди: %s", errorText)
+		log.Printf("Спреди: %s", errorMsg)
 		if originalMessageID != 0 {
-			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorText)
+			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorMsg)
 			sendAndLog(bot, editMsg, "spreads_top_coins_error_edit", chatID)
 		} else {
 			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorText), "spreads_top_coins_error_new", chatID)
@@ -149,12 +145,12 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	var wg sync.WaitGroup
 
 	delayBetweenCoinProcessing := 2500 * time.Millisecond
-
+	
 	for _, coinLoopVar := range topCoins {
 		wg.Add(1)
 		go func(currentCoin coingecko.CoinMarketData) {
 			defer wg.Done()
-
+			
 			mu.Lock()
 			processedCoins++
 			currentProcessedLocal := processedCoins
@@ -165,7 +161,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 				editProgressMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, progressText)
 				_, _ = bot.Send(editProgressMsg)
 			}
-
+			
 			var coinAllTickersForThisCoin []coingecko.CoinGeckoTickerDetail
 			for page := 1; page <= 1; page++ {
 				tickersResponse, errTicker := coingecko.GetCoinTickers(currentCoin.ID, page)
@@ -193,7 +189,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 					validTickers = append(validTickers, ticker)
 				}
 			}
-
+			
 			if len(validTickers) < 2 {
 				return
 			}
@@ -209,7 +205,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 
 					priceA_USD := tickerA.ConvertedLast["usd"]
 					priceB_USD := tickerB.ConvertedLast["usd"]
-
+					
 					var buyTicker, sellTicker coingecko.CoinGeckoTickerDetail
 					var spreadPercent, profitPer100 float64
 
@@ -237,21 +233,21 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 						}
 
 						op := SpreadOpportunity{
-							CoinID:          currentCoin.ID,
-							BaseCurrency:    strings.ToUpper(buyTicker.Base),
-							QuoteCurrency:   strings.ToUpper(buyTicker.Target),
-							BuyExchange:     buyTicker.Market.Name,
-							BuyPriceUSD:     buyTicker.ConvertedLast["usd"],
-							SellExchange:    sellTicker.Market.Name,
-							SellPriceUSD:    sellTicker.ConvertedLast["usd"],
-							SpreadPercent:   spreadPercent,
-							ProfitPer100USD: profitPer100, // ДОДАНО
-							TrustScoreBuy:   buyTicker.TrustScore,
-							TrustScoreSell:  sellTicker.TrustScore,
-							TradeURLBuy:     buyTicker.TradeURL,
-							TradeURLSell:    sellTicker.TradeURL,
-							Comment:         comment,
-							Category:        category,
+							CoinID:         currentCoin.ID,
+							BaseCurrency:   strings.ToUpper(buyTicker.Base),
+							QuoteCurrency:  strings.ToUpper(buyTicker.Target),
+							BuyExchange:    buyTicker.Market.Name,
+							BuyPriceUSD:    buyTicker.ConvertedLast["usd"],
+							SellExchange:   sellTicker.Market.Name,
+							SellPriceUSD:   sellTicker.ConvertedLast["usd"],
+							SpreadPercent:  spreadPercent,
+							ProfitPer100USD: profitPer100,
+							TrustScoreBuy:  buyTicker.TrustScore,
+							TrustScoreSell: sellTicker.TrustScore,
+							TradeURLBuy:    buyTicker.TradeURL,
+							TradeURLSell:   sellTicker.TradeURL,
+							Comment:        comment,
+							Category:       category,
 						}
 						mu.Lock()
 						allFoundSpreads = append(allFoundSpreads, op)
@@ -272,7 +268,8 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	})
 	
 	var reportText strings.Builder
-	reportText.WriteString(fmt.Sprintf("📈 **Знайдені Спреди (мін. %.2f%%, Топ-%d монет):**\n\n", cfg.SpreadMinPercentage, cfg.SpreadCoinCount))
+	reportText.WriteString(fmt.Sprintf("📈 **Знайдені Спреди (мін. %.2f%%, Топ-%d монет):**\n", cfg.SpreadMinPercentage, cfg.SpreadCoinCount))
+	reportText.WriteString("_Увага: Ціни з CoinGecko, можуть відрізнятися від реальних. Завжди перевіряйте на біржах!_\n\n") // ДОДАНО ДИСКЛЕЙМЕР
 
 	if len(allFoundSpreads) == 0 {
 		reportText.WriteString("Спредів, що відповідають вашим критеріям, не знайдено.")
@@ -288,12 +285,11 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 			tsSellDisplay := s.TrustScoreSell
 			if tsSellDisplay == "" { tsSellDisplay = "N/A" }
 
-			// Оновлено рядок форматування для додавання ProfitPer100USD
 			reportText.WriteString(fmt.Sprintf(
-				"**%s/%s (%.2f%%) | Прибуток на $100: `+$%.2f`**\n"+ // ДОДАНО ПРИБУТОК
+				"**%s/%s (%.2f%%) | Прибуток на $100: `+$%.2f`**\n"+
 					"  Купівля: *%s* (`$%.4f`, Trust: %s)\n"+
 					"  Продаж: *%s* (`$%.4f`, Trust: %s)\n",
-				s.BaseCurrency, s.QuoteCurrency, s.SpreadPercent, s.ProfitPer100USD, // ДОДАНО s.ProfitPer100USD
+				s.BaseCurrency, s.QuoteCurrency, s.SpreadPercent, s.ProfitPer100USD,
 				s.BuyExchange, s.BuyPriceUSD, tsBuyDisplay,
 				s.SellExchange, s.SellPriceUSD, tsSellDisplay,
 			))
