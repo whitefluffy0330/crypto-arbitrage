@@ -60,11 +60,8 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	case "red":
 		return true
 	default:
-		// Якщо в конфігурації число, можна спробувати його розпарсити.
-		// Але CoinGecko API v3 для /coins/{id}/tickers повертає trust_score як рядок ("green", "yellow", "red") або null.
-		// Числові значення (1-10) є для ендпоінта /exchanges.
-		// log.Printf("Спреди: Невідомий або непідтримуваний формат SpreadMinTrustScore: '%s'. Фільтр TrustScore не застосовано для цього значення.", minTrustScoreConfig)
-		return true // Поки що пропускаємо, якщо не розпізнано
+		log.Printf("Спреди: Невідомий або непідтримуваний формат SpreadMinTrustScore: '%s'. Фільтр TrustScore не застосовано для цього значення.", minTrustScoreConfig)
+		return true
 	}
 }
 
@@ -108,7 +105,6 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 	return fmt.Sprintf("🚫 Спред між '%s' та '%s' (не ваші). Токена немає на ваших біржах.", exchangeBuyID, exchangeSellID), 4
 }
 
-// HandleSpreadsCommand обробляє запит на пошук спредів
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config) {
 	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час (до кількох хвилин), будь ласка, зачекайте.")
 	sentMsg, errSendLoad := bot.Send(loadingMsg)
@@ -122,7 +118,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	log.Printf("Спреди: Початок пошуку. Топ монет: %d, Мін. спред: %.2f%%, Біржі користувача: %v, Мін. Trust Score: '%s'",
 		cfg.SpreadCoinCount, cfg.SpreadMinPercentage, cfg.SpreadUserExchanges, cfg.SpreadMinTrustScore)
 
-	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd") // Повертає []coingecko.CoinMarketData
+	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
 	if err != nil {
 		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
 		if strings.Contains(err.Error(), "429") {
@@ -150,14 +146,13 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	delayBetweenCoinProcessing := 2500 * time.Millisecond // Трохи збільшимо затримку
-	// delayBetweenTickerPages := 1500 * time.Millisecond // Не використовується, бо 1 сторінка
-
+	delayBetweenCoinProcessing := 2500 * time.Millisecond
+	
 	for _, coinLoopVar := range topCoins {
 		wg.Add(1)
-		go func(currentCoin coingecko.CoinMarketData) { // Використовуємо тип з пакету coingecko
+		go func(currentCoin coingecko.CoinMarketData) { // Повертаємо горутини
 			defer wg.Done()
-
+			
 			mu.Lock()
 			processedCoins++
 			currentProcessedLocal := processedCoins
@@ -166,12 +161,11 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 			if originalMessageID != 0 && currentProcessedLocal%5 == 0 {
 				progressText := fmt.Sprintf("⏳ Пошук спредів... Оброблено %d/%d: %s...", currentProcessedLocal, len(topCoins), currentCoin.Name)
 				editProgressMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, progressText)
-				// Не перевіряємо помилку тут, щоб не блокувати інші горутини
-				_, _ = bot.Request(editProgressMsg) // Використовуємо Request для EditMessageText
+				_, _ = bot.Send(editProgressMsg)
 			}
 
 			var coinAllTickersForThisCoin []coingecko.CoinGeckoTickerDetail
-			for page := 1; page <= 1; page++ { // Обмежено однією сторінкою для зменшення запитів
+			for page := 1; page <= 1; page++ { // Залишаємо 1 сторінку для швидкості
 				tickersResponse, errTicker := coingecko.GetCoinTickers(currentCoin.ID, page)
 				if errTicker != nil {
 					if strings.Contains(errTicker.Error(), "429") {
@@ -235,7 +229,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 					if spreadPercent >= cfg.SpreadMinPercentage {
 						comment, category := classifySpread(currentCoin.Symbol, buyTicker.Market.Identifier, sellTicker.Market.Identifier, userExchangesMap, coinAllTickersForThisCoin)
 						
-						if category == 4 && cfg.SpreadMinTrustScore != "" { // Не показуємо категорію 4, якщо є фільтр по TrustScore
+						if category == 4 && cfg.SpreadMinTrustScore != "" {
 							continue
 						}
 
@@ -261,11 +255,10 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 					}
 				}
 			}
-			// Затримка ПІСЛЯ обробки всіх тікерів однієї монети, ПЕРЕД переходом до наступної монети
 			time.Sleep(delayBetweenCoinProcessing)
 		}(coinLoopVar)
 	}
-	wg.Wait()
+	wg.Wait() // Повертаємо очікування горутин
 
 	sort.SliceStable(allFoundSpreads, func(i, j int) bool {
 		if allFoundSpreads[i].Category != allFoundSpreads[j].Category {
