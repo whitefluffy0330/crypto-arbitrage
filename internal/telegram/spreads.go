@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv" 
+	// "strconv" // Якщо strconv.Atoi більше не використовується в checkTrustScore, видаліть
 	"strings"
-	"sync"    
+	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -15,7 +15,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
 
-// SpreadOpportunity ... (структура без змін)
+// SpreadOpportunity зберігає інформацію про знайдений спред
 type SpreadOpportunity struct {
 	CoinID          string
 	BaseCurrency    string
@@ -25,7 +25,7 @@ type SpreadOpportunity struct {
 	SellExchange    string
 	SellPriceUSD    float64
 	SpreadPercent   float64
-	ProfitPer100USD float64 
+	ProfitPer100USD float64 // ДОДАНО: Прибуток на $100 інвестиції
 	TrustScoreBuy   string
 	TrustScoreSell  string
 	TradeURLBuy     string
@@ -65,6 +65,7 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 		return true
 	}
 }
+
 // classifySpread ... (функція без змін)
 func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
 	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
