@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	// "strconv" // Якщо не використовується
+	"strconv" 
 	"strings"
-	"sync"
+	"sync"    
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -15,7 +15,7 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
 
-// ... (структури SpreadOpportunity, isUserExchange, checkTrustScore, classifySpread - без змін) ...
+// SpreadOpportunity ... (структура без змін)
 type SpreadOpportunity struct {
 	CoinID          string
 	BaseCurrency    string
@@ -34,6 +34,7 @@ type SpreadOpportunity struct {
 	Category        int
 }
 
+// isUserExchange ... (функція без змін)
 func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
 	for _, ue := range userExchanges {
@@ -44,6 +45,7 @@ func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	return false
 }
 
+// checkTrustScore ... (функція без змін)
 func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
 		return true
@@ -59,10 +61,11 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	case "red":
 		return true
 	default:
-		log.Printf("Спреди: Невідомий формат SpreadMinTrustScore: '%s'. Фільтр не застосовано.", minTrustScoreConfig)
+		log.Printf("Спреди: Невідомий або непідтримуваний формат SpreadMinTrustScore: '%s'. Фільтр TrustScore не застосовано для цього значення.", minTrustScoreConfig)
 		return true
 	}
 }
+// classifySpread ... (функція без змін)
 func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
 	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
 	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
@@ -102,7 +105,6 @@ func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, use
 	return fmt.Sprintf("🚫 Спред між '%s' та '%s' (не ваші). Токена немає на ваших біржах.", exchangeBuyID, exchangeSellID), 4
 }
 
-
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config) {
 	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час (до кількох хвилин), будь ласка, зачекайте.")
 	sentMsg, errSendLoad := bot.Send(loadingMsg)
@@ -118,16 +120,16 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 
 	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
 	if err != nil {
-		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
+		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err) // Оголошуємо errorMsg
 		if strings.Contains(err.Error(), "429") {
 			errorMsg += "\n\n🚫 Схоже, ми досягли ліміту запитів до CoinGecko API. Спробуйте пізніше."
 		}
 		log.Printf("Спреди: %s", errorMsg)
 		if originalMessageID != 0 {
-			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorMsg)
+			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorMsg) // Використовуємо errorMsg
 			sendAndLog(bot, editMsg, "spreads_top_coins_error_edit", chatID)
 		} else {
-			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorText), "spreads_top_coins_error_new", chatID)
+			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorMsg), "spreads_top_coins_error_new", chatID) // ВИПРАВЛЕНО: errorMsg
 		}
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
@@ -148,7 +150,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	
 	for _, coinLoopVar := range topCoins {
 		wg.Add(1)
-		go func(currentCoin coingecko.CoinMarketData) {
+		go func(currentCoin coingecko.CoinMarketData) { 
 			defer wg.Done()
 			
 			mu.Lock()
@@ -233,21 +235,21 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 						}
 
 						op := SpreadOpportunity{
-							CoinID:         currentCoin.ID,
-							BaseCurrency:   strings.ToUpper(buyTicker.Base),
-							QuoteCurrency:  strings.ToUpper(buyTicker.Target),
-							BuyExchange:    buyTicker.Market.Name,
-							BuyPriceUSD:    buyTicker.ConvertedLast["usd"],
-							SellExchange:   sellTicker.Market.Name,
-							SellPriceUSD:   sellTicker.ConvertedLast["usd"],
-							SpreadPercent:  spreadPercent,
+							CoinID:          currentCoin.ID,
+							BaseCurrency:    strings.ToUpper(buyTicker.Base),
+							QuoteCurrency:   strings.ToUpper(buyTicker.Target),
+							BuyExchange:     buyTicker.Market.Name,
+							BuyPriceUSD:     buyTicker.ConvertedLast["usd"],
+							SellExchange:    sellTicker.Market.Name,
+							SellPriceUSD:    sellTicker.ConvertedLast["usd"],
+							SpreadPercent:   spreadPercent,
 							ProfitPer100USD: profitPer100,
-							TrustScoreBuy:  buyTicker.TrustScore,
-							TrustScoreSell: sellTicker.TrustScore,
-							TradeURLBuy:    buyTicker.TradeURL,
-							TradeURLSell:   sellTicker.TradeURL,
-							Comment:        comment,
-							Category:       category,
+							TrustScoreBuy:   buyTicker.TrustScore,
+							TrustScoreSell:  sellTicker.TrustScore,
+							TradeURLBuy:     buyTicker.TradeURL,
+							TradeURLSell:    sellTicker.TradeURL,
+							Comment:         comment,
+							Category:        category,
 						}
 						mu.Lock()
 						allFoundSpreads = append(allFoundSpreads, op)
@@ -269,7 +271,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	
 	var reportText strings.Builder
 	reportText.WriteString(fmt.Sprintf("📈 **Знайдені Спреди (мін. %.2f%%, Топ-%d монет):**\n", cfg.SpreadMinPercentage, cfg.SpreadCoinCount))
-	reportText.WriteString("_Увага: Ціни з CoinGecko, можуть відрізнятися від реальних. Завжди перевіряйте на біржах!_\n\n") // ДОДАНО ДИСКЛЕЙМЕР
+	reportText.WriteString("_Увага: Ціни з CoinGecko, можуть відрізнятися від реальних. Завжди перевіряйте на біржах!_\n\n")
 
 	if len(allFoundSpreads) == 0 {
 		reportText.WriteString("Спредів, що відповідають вашим критеріям, не знайдено.")
