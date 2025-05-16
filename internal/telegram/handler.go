@@ -41,6 +41,7 @@ func requestAndLog(bot *tgbotapi.BotAPI, c tgbotapi.CallbackConfig, commandName 
 }
 
 func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery, chatID int64, exchangeName, exchangeCallbackPrefix string) {
+	// ... (Код з відповіді #317 без змін) ...
 	log.Printf("Обробка запиту фандингу для біржі: %s (ChatID: %d)", exchangeName, chatID)
 
 	answerCallback := tgbotapi.NewCallback(query.ID, fmt.Sprintf("Завантажую ставки з %s...", exchangeName))
@@ -468,7 +469,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnSpreads, "/spreads": 
 		log.Printf("Обробка '%s' для ChatID %d.", msgText, chatID)
-		// ВИПРАВЛЕНО: Прибрано зайвий аргумент 0
+		// ВИПРАВЛЕНО: Прибрано зайвий аргумент originalMessageID
 		go HandleSpreadsCommand(bot, chatID, cfg) 
 		initialReply := tgbotapi.NewMessage(chatID, "⏳ Розпочато пошук спредів. Це може зайняти кілька хвилин. Я повідомлю про результат.")
 		sendAndLog(bot, initialReply, "spreads_search_started", chatID)
