@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv" 
+	// "strconv" // ВИДАЛЕНО, якщо не використовується (перевірте checkTrustScore)
 	"strings"
-	"sync"    
+	"sync"    // ПОВЕРНУТО для горутин
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -34,7 +34,7 @@ type SpreadOpportunity struct {
 	Category        int
 }
 
-// isUserExchange ... (без змін)
+// isUserExchange ... (функція без змін)
 func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
 	for _, ue := range userExchanges {
@@ -45,7 +45,7 @@ func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
 	return false
 }
 
-// checkTrustScore ... (без змін)
+// checkTrustScore ... (функція без змін)
 func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
 		return true
@@ -65,7 +65,7 @@ func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
 		return true
 	}
 }
-// classifySpread ... (без змін)
+// classifySpread ... (функція без змін)
 func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
 	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
 	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
@@ -120,16 +120,16 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 
 	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
 	if err != nil {
-		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
+		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err) // Оголошуємо errorMsg
 		if strings.Contains(err.Error(), "429") {
 			errorMsg += "\n\n🚫 Схоже, ми досягли ліміту запитів до CoinGecko API. Спробуйте пізніше."
 		}
 		log.Printf("Спреди: %s", errorMsg)
 		if originalMessageID != 0 {
-			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorMsg)
+			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorMsg) // Використовуємо errorMsg
 			sendAndLog(bot, editMsg, "spreads_top_coins_error_edit", chatID)
 		} else {
-			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorMsg), "spreads_top_coins_error_new", chatID)
+			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorMsg), "spreads_top_coins_error_new", chatID) // ВИПРАВЛЕНО: errorMsg
 		}
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
@@ -146,11 +146,11 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	delayBetweenCoinProcessing := 3000 * time.Millisecond // Збільшено затримку
+	delayBetweenCoinProcessing := 2500 * time.Millisecond
 	
 	for _, coinLoopVar := range topCoins {
 		wg.Add(1)
-		go func(currentCoin coingecko.CoinMarketData) { // Використовуємо тип з пакету coingecko
+		go func(currentCoin coingecko.CoinMarketData) { 
 			defer wg.Done()
 			
 			mu.Lock()
@@ -158,27 +158,25 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 			currentProcessedLocal := processedCoins
 			mu.Unlock()
 
-			if originalMessageID != 0 && currentProcessedLocal%2 == 0 { // Оновлюємо прогрес частіше
+			if originalMessageID != 0 && currentProcessedLocal%5 == 0 {
 				progressText := fmt.Sprintf("⏳ Пошук спредів... Оброблено %d/%d: %s...", currentProcessedLocal, len(topCoins), currentCoin.Name)
 				editProgressMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, progressText)
 				_, _ = bot.Send(editProgressMsg)
 			}
 			
 			var coinAllTickersForThisCoin []coingecko.CoinGeckoTickerDetail
-			for page := 1; page <= 1; page++ { // Залишаємо 1 сторінку для зменшення запитів
+			for page := 1; page <= 1; page++ {
 				tickersResponse, errTicker := coingecko.GetCoinTickers(currentCoin.ID, page)
 				if errTicker != nil {
 					if strings.Contains(errTicker.Error(), "429") {
 						log.Printf("Спреди: Досягнуто ліміту CoinGecko при отриманні тікерів для %s.", currentCoin.ID)
 					}
-					// Не робимо break тут, щоб горутина завершилася і wg.Done() викликався
-					return // Виходимо з горутини, якщо помилка
+					break
 				}
 				if len(tickersResponse.Tickers) == 0 {
 					break
 				}
 				coinAllTickersForThisCoin = append(coinAllTickersForThisCoin, tickersResponse.Tickers...)
-				// Немає потреби в паузі, якщо тільки одна сторінка
 			}
 
 			var validTickers []coingecko.CoinGeckoTickerDetail
@@ -259,13 +257,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config)
 					}
 				}
 			}
-			// Затримка ПІСЛЯ обробки всіх тікерів однієї монети, ПЕРЕД переходом до наступної монети
-			// Ця затримка тепер відбувається в кінці кожної горутини,
-			// але оскільки горутини запускаються швидко, загальний rate limiting
-			// більше залежить від кількості одночасних горутин та кількості запитів всередині.
-			// Для більш точного контролю потрібен глобальний rate limiter.
-			// Поки що залишимо так, але збільшимо її.
-			time.Sleep(delayBetweenCoinProcessing) 
+			time.Sleep(delayBetweenCoinProcessing)
 		}(coinLoopVar)
 	}
 	wg.Wait()
