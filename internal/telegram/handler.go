@@ -468,7 +468,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnSpreads, "/spreads": 
 		log.Printf("Обробка '%s' для ChatID %d.", msgText, chatID)
-		// ВИПРАВЛЕНО: Прибрано зайвий аргумент
+		// ВИПРАВЛЕНО: Прибрано зайвий аргумент 0
 		go HandleSpreadsCommand(bot, chatID, cfg) 
 		initialReply := tgbotapi.NewMessage(chatID, "⏳ Розпочато пошук спредів. Це може зайняти кілька хвилин. Я повідомлю про результат.")
 		sendAndLog(bot, initialReply, "spreads_search_started", chatID)
