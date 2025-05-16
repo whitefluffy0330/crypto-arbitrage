@@ -14,9 +14,9 @@ const (
 	BtnWorkStop            = "⛔️ Стоп"
 	BtnWorkDayOff          = "🏖 Вихідний"
 	BtnCloseGoal           = "❌ Закрити ціль"
-	BtnAddInvestment       = "➕ Додати Інвестицію" // Оновлений текст
-	BtnSetFundingThreshold = "⚙️ Поріг Funding"    // Нова кнопка
-	BtnSpreads             = "📈 Спреди"         // Нова кнопка для спредів
+	BtnAddInvestment       = "➕ Додати Інвестицію"
+	BtnSetFundingThreshold = "⚙️ Поріг Funding"
+	BtnSpreads             = "📈 Спреди"
 )
 
 // Константи для CallbackData кнопок вибору біржі для фандингу
@@ -43,10 +43,10 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnCloseGoal),
-			tgbotapi.NewKeyboardButton(BtnAddInvestment),    // Використовуємо константу
-			tgbotapi.NewKeyboardButton(BtnSetFundingThreshold), // Нова кнопка
+			tgbotapi.NewKeyboardButton(BtnAddInvestment),
+			tgbotapi.NewKeyboardButton(BtnSetFundingThreshold),
 		),
-		tgbotapi.NewKeyboardButtonRow( // Новий рядок для кнопки Спредів
+		tgbotapi.NewKeyboardButtonRow( 
 			tgbotapi.NewKeyboardButton(BtnSpreads),
 		),
 	)
@@ -59,7 +59,6 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 }
 
-// CreateConfirmationKeyboard створює inline-клавіатуру "Так/Ні"
 func CreateConfirmationKeyboard(yesCallbackData, noCallbackData string) tgbotapi.InlineKeyboardMarkup {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -70,7 +69,6 @@ func CreateConfirmationKeyboard(yesCallbackData, noCallbackData string) tgbotapi
 	return keyboard
 }
 
-// CreateFundingExchangeSelectionKeyboard створює inline-клавіатуру для вибору біржі для фандингу
 func CreateFundingExchangeSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 	exchanges := []struct {
 		Name         string
@@ -80,8 +78,7 @@ func CreateFundingExchangeSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 		{"Bybit", CallbackFundingBybit},
 		{"OKX", CallbackFundingOKX},
 		{"MEXC", CallbackFundingMEXC},
-		{"Bitget", CallbackFundingBitget}, 
-		// Додайте сюди інші біржі, коли вони будуть готові
+		{"Bitget", CallbackFundingBitget},
 	}
 
 	var rows [][]tgbotapi.InlineKeyboardButton
@@ -89,10 +86,9 @@ func CreateFundingExchangeSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 
 	for i, ex := range exchanges {
 		currentRow = append(currentRow, tgbotapi.NewInlineKeyboardButtonData(ex.Name, ex.CallbackData))
-		// Робимо по 2 кнопки в рядку для кращого вигляду
 		if (i+1)%2 == 0 || i == len(exchanges)-1 {
 			rows = append(rows, tgbotapi.NewInlineKeyboardRow(currentRow...))
-			currentRow = []tgbotapi.InlineKeyboardButton{} // Очищаємо для наступного рядка
+			currentRow = []tgbotapi.InlineKeyboardButton{}
 		}
 	}
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
