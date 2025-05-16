@@ -220,6 +220,7 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 	keyboard.ShowMainKeyboard(bot, chatID)
 }
 
+
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
 	if update.CallbackQuery != nil {
 		chatID := update.CallbackQuery.Message.Chat.ID
@@ -472,7 +473,10 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnSpreads, "/spreads": 
 		log.Printf("Обробка '%s' для ChatID %d.", msgText, chatID)
-		go HandleSpreadsCommand(bot, chatID, cfg, 0) // Передаємо 0 як originalMessageID, бо це новий запит
+		// Запускаємо HandleSpreadsCommand в горутині, передаючи originalMessageID=0, 
+		// оскільки це новий запит, а не відповідь на callback з існуючим повідомленням.
+		// HandleSpreadsCommand сам надішле початкове повідомлення "Завантажую...".
+		go HandleSpreadsCommand(bot, chatID, cfg, 0) 
 		initialReply := tgbotapi.NewMessage(chatID, "⏳ Розпочато пошук спредів. Це може зайняти кілька хвилин. Я повідомлю про результат.")
 		sendAndLog(bot, initialReply, "spreads_search_started", chatID)
 		keyboard.ShowMainKeyboard(bot, chatID) 
@@ -508,7 +512,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 			keyboard.ShowMainKeyboard(bot, chatID)
 		}
 	}
-} 
+}
 
 func formatDurationToNextFunding(d time.Duration) string {
 	isPast := false; if d < 0 { d = -d; isPast = true }
