@@ -16,7 +16,7 @@ const (
 	BtnCloseGoal           = "❌ Закрити ціль"
 	BtnAddInvestment       = "➕ Додати Інвестицію"
 	BtnSetFundingThreshold = "⚙️ Поріг Funding"
-	BtnSpreads             = "📈 Спреди" // Нова кнопка для спредів
+	BtnSpreads             = "📈 Спреди" // Кнопка для спредів
 )
 
 // Константи для CallbackData кнопок вибору біржі для фандингу
@@ -47,7 +47,7 @@ func ShowMainKeyboard(bot *tgbotapi.BotAPI, chatID int64) {
 			tgbotapi.NewKeyboardButton(BtnSetFundingThreshold),
 		),
 		tgbotapi.NewKeyboardButtonRow( 
-			tgbotapi.NewKeyboardButton(BtnSpreads),
+			tgbotapi.NewKeyboardButton(BtnSpreads), // Додано кнопку спредів
 		),
 	)
 	keyboard.ResizeKeyboard = true
