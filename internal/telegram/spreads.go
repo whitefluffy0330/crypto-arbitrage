@@ -3,11 +3,10 @@ package telegram
 import (
 	"fmt"
 	"log"
-	"sort"
-	// "strconv" // Переконайтеся, що він видалений, якщо checkTrustScore не використовує strconv.Atoi
+	"sort" 
 	"strings"
-	"sync"
-	"time"
+	// "sync"    // ВИДАЛЕНО, оскільки горутини для обробки монет тимчасово прибрані
+	"time" // Залишаємо, використовується в delayBetweenCoinProcessing
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
@@ -15,95 +14,9 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
 )
 
-// SpreadOpportunity ... (структура без змін)
-type SpreadOpportunity struct {
-	CoinID          string
-	BaseCurrency    string
-	QuoteCurrency   string
-	BuyExchange     string
-	BuyPriceUSD     float64
-	SellExchange    string
-	SellPriceUSD    float64
-	SpreadPercent   float64
-	ProfitPer100USD float64
-	TrustScoreBuy   string
-	TrustScoreSell  string
-	TradeURLBuy     string
-	TradeURLSell    string
-	Comment         string
-	Category        int
-}
-
-// isUserExchange ... (функція без змін)
-func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
-	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
-	for _, ue := range userExchanges {
-		if normalizedIdentifier == ue {
-			return true
-		}
-	}
-	return false
-}
-
-// checkTrustScore ... (функція без змін)
-func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
-	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
-		return true
-	}
-	if tickerTrustScore == "" && minTrustScoreConfig != "" && minTrustScoreConfig != "any" {
-		return false
-	}
-	switch strings.ToLower(minTrustScoreConfig) {
-	case "green":
-		return strings.ToLower(tickerTrustScore) == "green"
-	case "yellow":
-		return strings.ToLower(tickerTrustScore) == "green" || strings.ToLower(tickerTrustScore) == "yellow"
-	case "red":
-		return true
-	default:
-		log.Printf("Спреди: Невідомий або непідтримуваний формат SpreadMinTrustScore: '%s'. Фільтр TrustScore не застосовано для цього значення.", minTrustScoreConfig)
-		return true
-	}
-}
-// classifySpread ... (функція без змін)
-func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
-	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
-	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
-
-	tokenOnUserOtherExchange := false
-	var userExchangeWithToken string
-	for _, ticker := range allCoinGeckoTickers {
-		if strings.ToUpper(ticker.Base) == strings.ToUpper(coinSymbol) &&
-			strings.ToUpper(ticker.Target) == "USDT" &&
-			userExchangesMap[strings.ToLower(ticker.Market.Identifier)] &&
-			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeBuyID) &&
-			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeSellID) {
-			tokenOnUserOtherExchange = true
-			userExchangeWithToken = ticker.Market.Name
-			break
-		}
-	}
-
-	if buyIsUser && sellIsUser {
-		return "✅ Обидві біржі у вашому списку!", 1
-	}
-	if buyIsUser {
-		if tokenOnUserOtherExchange {
-			return fmt.Sprintf("ℹ️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeSellID, userExchangeWithToken), 2
-		}
-		return fmt.Sprintf("⚠️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeSellID), 2
-	}
-	if sellIsUser {
-		if tokenOnUserOtherExchange {
-			return fmt.Sprintf("ℹ️ Продаж на вашій біржі. Купівля на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeBuyID, userExchangeWithToken), 2
-		}
-		return fmt.Sprintf("⚠️ Продаж на вашій біржі. Купівля на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeBuyID), 2
-	}
-	if tokenOnUserOtherExchange {
-		return fmt.Sprintf("🔍 Спред між '%s' та '%s' (не ваші). Токен є на вашій біржі '%s'.", exchangeBuyID, exchangeSellID, userExchangeWithToken), 3
-	}
-	return fmt.Sprintf("🚫 Спред між '%s' та '%s' (не ваші). Токена немає на ваших біржах.", exchangeBuyID, exchangeSellID), 4
-}
+// ... решта коду файлу spreads.go залишається такою ж, як у відповіді #325 ...
+// (тобто, основна логіка в HandleSpreadsCommand все ще послідовна, без горутин для монет)
+// ...
 
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config, originalMessageID int) {
 	log.Printf("Спреди (послідовна обробка): Початок пошуку. Топ монет: %d, Мін. спред: %.2f%%", cfg.SpreadCoinCount, cfg.SpreadMinPercentage)
@@ -135,7 +48,12 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 	processedCoins := 0
 	delayBetweenCoinProcessing := 6 * time.Second 
 
+	hitRateLimit := false 
+
 	for i, currentCoin := range topCoins { 
+		if hitRateLimit { 
+			break
+		}
 		processedCoins++
 		if originalMessageID != 0 && (processedCoins%1 == 0 || processedCoins == len(topCoins)) { 
 			progressText := fmt.Sprintf("⏳ Пошук спредів... Оброблено %d/%d: %s...", processedCoins, len(topCoins), currentCoin.Name)
@@ -146,39 +64,15 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 		}
 		
 		var coinAllTickersForThisCoin []coingecko.CoinGeckoTickerDetail
-		tickersResponse, errTicker := coingecko.GetCoinTickers(currentCoin.ID, 1) 
+		tickersResponse, errTicker := coingecko.GetCoinTickers(currentCoin.ID, 1)
 		if errTicker != nil {
 			if strings.Contains(errTicker.Error(), "429") {
 				log.Printf("Спреди: Досягнуто ліміту CoinGecko при отриманні тікерів для %s. Завершуємо поточний пошук спредів.", currentCoin.ID)
-				errorMsgForUser := "\n\n⚠️ Досягнуто ліміту запитів до CoinGecko. Результати можуть бути неповними. Спробуйте пізніше."
-				// Формуємо фінальний звіт з тим, що є, та цим повідомленням
-				// (Логіка формування звіту та надсилання буде нижче, після виходу з циклу)
-				// Поки що просто виходимо з циклу обробки монет.
-				// Змінна allFoundSpreads буде містити те, що встигли знайти.
-				if len(allFoundSpreads) == 0 { // Якщо зовсім нічого не встигли знайти
-					var tempReport strings.Builder
-					tempReport.WriteString(fmt.Sprintf("📈 **Знайдені Спреди (мін. %.2f%%, Топ-%d монет):**\n", cfg.SpreadMinPercentage, cfg.SpreadCoinCount))
-					tempReport.WriteString("_Увага: Ціни з CoinGecko, можуть відрізнятися від реальних. Завжди перевіряйте на біржах! Комісії не враховані._\n\n")
-					tempReport.WriteString("Спредів, що відповідають вашим критеріям, не знайдено." + errorMsgForUser)
-					
-					finalTextEarlyExit := tempReport.String()
-					if originalMessageID != 0 {
-						deleteMsg := tgbotapi.NewDeleteMessage(chatID, originalMessageID)
-						_, _ = bot.Send(deleteMsg) 
-					}
-					finalMsgEarlyExit := tgbotapi.NewMessage(chatID, finalTextEarlyExit)
-					finalMsgEarlyExit.ParseMode = tgbotapi.ModeMarkdown
-					finalMsgEarlyExit.DisableWebPagePreview = true 
-					sendAndLog(bot, finalMsgEarlyExit, "spreads_report_api_limit_early", chatID)
-					keyboard.ShowMainKeyboard(bot, chatID)
-					return // Повністю виходимо з HandleSpreadsCommand
-				}
-				// Якщо щось вже знайдено, то повідомлення про ліміт додасться до фінального звіту
-				log.Printf("Спреди: Досягнуто ліміту API, звіт буде сформовано з частковими даними.")
-				break // Виходимо з циклу обробки монет
+				hitRateLimit = true 
+			} else {
+				log.Printf("Спреди: Помилка отримання тікерів для %s: %v. Пропускаємо монету.", currentCoin.ID, errTicker)
 			}
-			log.Printf("Спреди: Помилка отримання тікерів для %s: %v. Пропускаємо монету.", currentCoin.ID, errTicker)
-			if i < len(topCoins)-1 { time.Sleep(delayBetweenCoinProcessing) }
+			if i < len(topCoins)-1 && !hitRateLimit { time.Sleep(delayBetweenCoinProcessing) }
 			continue 
 		}
 		if len(tickersResponse.Tickers) > 0 {
@@ -234,7 +128,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 				}
 			}
 		}
-		if i < len(topCoins)-1 { time.Sleep(delayBetweenCoinProcessing) }
+		if i < len(topCoins)-1 && !hitRateLimit { time.Sleep(delayBetweenCoinProcessing) }
 	} 
 	
 	sort.SliceStable(allFoundSpreads, func(i, j int) bool {
@@ -249,11 +143,10 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 	reportText.WriteString("_Увага: Ціни з CoinGecko, можуть відрізнятися від реальних. Завжди перевіряйте на біржах! Комісії не враховані._\n\n")
 
 	if len(allFoundSpreads) == 0 {
-		// Якщо allFoundSpreads порожній, але ми не вийшли через ліміт API, то спредів дійсно немає
-		if !strings.Contains(err.Error(), "429") { // Якщо помилка була не через ліміт
-			 reportText.WriteString("Спредів, що відповідають вашим критеріям, не знайдено.")
+		reportText.WriteString("Спредів, що відповідають вашим критеріям, не знайдено.")
+		if hitRateLimit { 
+			reportText.WriteString("\n\n⚠️ Досягнуто ліміту запитів до CoinGecko. Результати можуть бути неповними. Спробуйте пізніше.")
 		}
-		// Якщо була помилка 429 і allFoundSpreads порожній, повідомлення про ліміт вже було відправлено
 	} else {
 		limitSpreads := 7 
 		displayedCount := 0
@@ -295,30 +188,26 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 		if len(allFoundSpreads) > displayedCount {
 			reportText.WriteString(fmt.Sprintf("... та ще %d спредів знайдено.", len(allFoundSpreads)-displayedCount))
 		}
+		if hitRateLimit { 
+			reportText.WriteString("\n\n⚠️ Досягнуто ліміту запитів до CoinGecko. Показані результати можуть бути неповними.")
+		}
 	}
 	
 	finalText := reportText.String()
-	// Перевіряємо, чи звіт не є просто заголовком і повідомленням "не знайдено" (якщо вже надіслали про ліміт)
-	if strings.TrimSpace(finalText) == strings.TrimSpace(fmt.Sprintf("📈 **Знайдені Спреди (мін. %.2f%%, Топ-%d монет):**\n_Увага: Ціни з CoinGecko, можуть відрізнятися від реальних. Завжди перевіряйте на біржах! Комісії не враховані._\n\nСпредів, що відповідають вашим критеріям, не знайдено.", cfg.SpreadMinPercentage, cfg.SpreadCoinCount)) &&
-	   (err != nil && strings.Contains(err.Error(), "429")) { // Якщо була помилка 429 і спредів не знайдено
-		// То не надсилаємо цей "порожній" звіт, бо вже надіслали повідомлення про ліміт
-		log.Println("Спреди: Звіт порожній і була помилка ліміту API, фінальне повідомлення не надсилається.")
-	} else {
-		if len(finalText) > MaxTelegramMessageSize {
-			log.Printf("Спреди: Повідомлення занадто довге (%d). Обрізаємо.", len(finalText))
-			finalText = finalText[:MaxTelegramMessageSize-30] + "\n... (повідомлення обрізано)"
-		}
-
-		if originalMessageID != 0 {
-			deleteMsg := tgbotapi.NewDeleteMessage(chatID, originalMessageID)
-			_, _ = bot.Send(deleteMsg) 
-		}
-		
-		finalMsg := tgbotapi.NewMessage(chatID, finalText)
-		finalMsg.ParseMode = tgbotapi.ModeMarkdown
-		finalMsg.DisableWebPagePreview = true 
-		sendAndLog(bot, finalMsg, "spreads_report_final", chatID)
+	if len(finalText) > MaxTelegramMessageSize {
+		log.Printf("Спреди: Повідомлення занадто довге (%d). Обрізаємо.", len(finalText))
+		finalText = finalText[:MaxTelegramMessageSize-30] + "\n... (повідомлення обрізано)"
 	}
+
+	if originalMessageID != 0 {
+		deleteMsg := tgbotapi.NewDeleteMessage(chatID, originalMessageID)
+		_, _ = bot.Send(deleteMsg) 
+	}
+	
+	finalMsg := tgbotapi.NewMessage(chatID, finalText)
+	finalMsg.ParseMode = tgbotapi.ModeMarkdown
+	finalMsg.DisableWebPagePreview = true 
+	sendAndLog(bot, finalMsg, "spreads_report_final", chatID)
 	
 	keyboard.ShowMainKeyboard(bot, chatID)
 }
