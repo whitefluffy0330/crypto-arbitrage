@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/config" // Може знадобитися для ліміту
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/config" // Може знадобитися для лімітів
 )
 
 const (
@@ -68,6 +68,7 @@ type CMCMarketPairsResponse struct {
 		Timestamp    string `json:"timestamp"`
 		ErrorCode    int    `json:"error_code"`
 		ErrorMessage string `json:"error_message"`
+		CreditCount  int    `json:"credit_count"` // Додано для відстеження кредитів
 	} `json:"status"`
 	Data struct {
 		ID             int             `json:"id"`
@@ -92,8 +93,8 @@ type UnifiedTickerInfoCMC struct {
 	QuoteCurrency      string
 	PriceUSD           float64
 	Volume24hUSD       float64
-	TrustScore         string // Заповнюватиметься як "N/A" або аналогічно
-	TradeURL           string // Залишатиметься порожнім, якщо CMC не надає
+	TrustScore         string // Заповнюватиметься як "N/A"
+	TradeURL           string // Залишатиметься порожнім
 }
 
 func makeCMCRequest(apiKey, endpointPath string, queryParams url.Values) ([]byte, error) {
@@ -109,7 +110,7 @@ func makeCMCRequest(apiKey, endpointPath string, queryParams url.Values) ([]byte
 	req.Header.Set("Accepts", "application/json")
 	req.Header.Set("X-CMC_PRO_API_KEY", apiKey)
 
-	client := http.Client{Timeout: 20 * time.Second} // Збільшено таймаут
+	client := http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP запит до CMC (%s): %w", endpointPath, err)
@@ -122,16 +123,14 @@ func makeCMCRequest(apiKey, endpointPath string, queryParams url.Values) ([]byte
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Спробуємо розпарсити помилку, якщо вона є в JSON форматі
 		var errorResponse struct {
 			Status struct {
 				ErrorCode    int    `json:"error_code"`
 				ErrorMessage string `json:"error_message"`
 			} `json:"status"`
 		}
-		// Логуємо сире тіло помилки перед спробою парсингу
 		logBody := string(bodyBytes)
-		if len(logBody) > 1024 { // Обмежимо довжину логу
+		if len(logBody) > 1024 {
 			logBody = logBody[:1024] + "..."
 		}
 		log.Printf("CoinMarketCap: Помилка статусу %d від %s. Тіло: %s", resp.StatusCode, reqURL, logBody)
@@ -144,29 +143,23 @@ func makeCMCRequest(apiKey, endpointPath string, queryParams url.Values) ([]byte
 	return bodyBytes, nil
 }
 
-// GetTopMarketCapCoinsCMC отримує топ-N монет з CoinMarketCap
-// Важливо: 'limit' тут визначає, скільки монет запитувати у API.
-// Якщо ви хочете використовувати cfg.SpreadCoinCount, його потрібно передати сюди.
 func GetTopMarketCapCoinsCMC(apiKey string, limit int) ([]UnifiedCoinInfoCMC, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("API ключ CoinMarketCap не надано")
 	}
 	if limit <= 0 {
 		log.Printf("CoinMarketCap: Неправильний ліміт %d для GetTopMarketCapCoinsCMC, встановлено на 20", limit)
-		limit = 20 // Безпечне значення за замовчуванням, якщо передано невірне
+		limit = 20
 	}
 
 	params := url.Values{}
 	params.Add("start", "1")
 	params.Add("limit", strconv.Itoa(limit))
 	params.Add("convert", "USD")
-	// params.Add("sort", "market_cap") // За замовчуванням сортування за ринковою капіталізацією
-	// params.Add("sort_dir", "desc")
 
 	log.Printf("CoinMarketCap: Запит топ-%d монет.", limit)
 	bodyBytes, err := makeCMCRequest(apiKey, listingsLatestPath, params)
 	if err != nil {
-		// помилка вже детально логується в makeCMCRequest або при HTTP помилці
 		return nil, fmt.Errorf("запит до CMC /listings/latest не вдався: %w", err)
 	}
 
@@ -176,27 +169,23 @@ func GetTopMarketCapCoinsCMC(apiKey string, limit int) ([]UnifiedCoinInfoCMC, er
 		if len(bodyStr) > 500 {
 			bodyStr = bodyStr[:500] + "..."
 		}
-		// Це логування допоможе побачити, що саме не так з JSON
 		log.Printf("CoinMarketCap: Не вдалося розпарсити JSON з /listings/latest. Тіло: %s", bodyStr)
 		return nil, fmt.Errorf("декодування відповіді /listings/latest від CMC: %w", err)
 	}
 
-	// Перевірка на логічні помилки API після успішного парсингу
 	if cmcResponse.Status.ErrorCode != 0 {
 		log.Printf("CoinMarketCap: API /listings/latest повернуло логічну помилку: %s (код %d), Credits: %d", cmcResponse.Status.ErrorMessage, cmcResponse.Status.ErrorCode, cmcResponse.Status.CreditCount)
 		return nil, fmt.Errorf("API CMC /listings/latest помилка: %s (код %d)", cmcResponse.Status.ErrorMessage, cmcResponse.Status.ErrorCode)
 	}
-
-	if len(cmcResponse.Data) == 0 {
-		log.Printf("CoinMarketCap: Отримано 0 монет з /listings/latest для ліміту %d. Перевірте API ключ або параметри запиту. Credits: %d", limit, cmcResponse.Status.CreditCount)
-        // Не повертаємо помилку, а порожній зріз, якщо API відпрацювало коректно, але даних немає
+	
+	if len(cmcResponse.Data) == 0 && cmcResponse.Status.ErrorCode == 0 {
+		log.Printf("CoinMarketCap: Отримано 0 монет з /listings/latest для ліміту %d. Credits: %d", limit, cmcResponse.Status.CreditCount)
 	}
-
 
 	var coins []UnifiedCoinInfoCMC
 	for _, coinData := range cmcResponse.Data {
 		coins = append(coins, UnifiedCoinInfoCMC{
-			ID:     strconv.Itoa(coinData.ID), // Використовуємо числовий ID як рядок
+			ID:     strconv.Itoa(coinData.ID),
 			Symbol: strings.ToUpper(coinData.Symbol),
 			Name:   coinData.Name,
 		})
@@ -205,5 +194,92 @@ func GetTopMarketCapCoinsCMC(apiKey string, limit int) ([]UnifiedCoinInfoCMC, er
 	return coins, nil
 }
 
-// Наступною буде функція GetCoinTickersCMC
-// ... (решта коду, включаючи GetCoinTickersCMC, буде додана пізніше)
+// GetCoinTickersCMC отримує тікери для конкретної монети з CoinMarketCap
+// coinIdentifier може бути ID монети (числовим) або її символом.
+func GetCoinTickersCMC(apiKey string, coinIdentifier string) ([]UnifiedTickerInfoCMC, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("API ключ CoinMarketCap не надано")
+	}
+	if coinIdentifier == "" {
+		return nil, fmt.Errorf("ідентифікатор монети для GetCoinTickersCMC не надано")
+	}
+
+	params := url.Values{}
+	// CoinMarketCap дозволяє шукати за ID, slug або symbol.
+	// Якщо coinIdentifier - це число, вважаємо, що це ID. Інакше - symbol.
+	// У нашому UnifiedCoinInfoCMC.ID зберігається числовий ID як рядок.
+	if _, err := strconv.Atoi(coinIdentifier); err == nil {
+		params.Add("id", coinIdentifier)
+	} else {
+		// Якщо не число, то це може бути slug або symbol.
+		// Ендпоінт /market-pairs/latest краще працює з ID або slug.
+		// Якщо це символ, можливо, знадобиться попередньо отримати ID/slug.
+		// Поки що припустимо, що coinIdentifier - це ID (як рядок) або slug,
+		// або символ, який API зможе розпізнати. Для надійності краще передавати ID.
+		params.Add("slug", coinIdentifier) // Спробуємо slug, якщо це не ID
+		// Або params.Add("symbol", strings.ToUpper(coinIdentifier))
+	}
+	params.Add("convert", "USD")
+	// ліміт тікерів, за замовчуванням 100, макс 5000 на деяких планах.
+	// Для спредів зазвичай достатньо ~20-50 топ-тікерів за обсягом, але API не сортує їх так.
+	params.Add("limit", "100") 
+	// Можна додати &aux=market_cap_by_total_supply,effective_liquidity для отримання дод. даних
+	// params.Add("aux", "effective_liquidity,market_score") // Для отримання score
+
+	log.Printf("CoinMarketCap: Запит тікерів для монети '%s'.", coinIdentifier)
+	bodyBytes, err := makeCMCRequest(apiKey, marketPairsPath, params)
+	if err != nil {
+		return nil, fmt.Errorf("запит до CMC /market-pairs/latest не вдався: %w", err)
+	}
+
+	var cmcResponse CMCMarketPairsResponse
+	if err := json.Unmarshal(bodyBytes, &cmcResponse); err != nil {
+		bodyStr := string(bodyBytes)
+		if len(bodyStr) > 500 {
+			bodyStr = bodyStr[:500] + "..."
+		}
+		log.Printf("CoinMarketCap: Не вдалося розпарсити JSON з /market-pairs/latest для '%s'. Тіло: %s", coinIdentifier, bodyStr)
+		return nil, fmt.Errorf("декодування відповіді /market-pairs/latest від CMC для '%s': %w", coinIdentifier, err)
+	}
+
+	if cmcResponse.Status.ErrorCode != 0 {
+		log.Printf("CoinMarketCap: API /market-pairs/latest для '%s' повернуло логічну помилку: %s (код %d), Credits: %d", coinIdentifier, cmcResponse.Status.ErrorMessage, cmcResponse.Status.ErrorCode, cmcResponse.Status.CreditCount)
+		return nil, fmt.Errorf("API CMC /market-pairs/latest помилка для '%s': %s (код %d)", coinIdentifier, cmcResponse.Status.ErrorMessage, cmcResponse.Status.ErrorCode)
+	}
+
+	if len(cmcResponse.Data.MarketPairs) == 0 && cmcResponse.Status.ErrorCode == 0 {
+        log.Printf("CoinMarketCap: Отримано 0 тікерів з /market-pairs/latest для '%s' (CoinID: %d, CoinName: %s). Credits: %d", coinIdentifier, cmcResponse.Data.ID, cmcResponse.Data.Name, cmcResponse.Status.CreditCount)
+    }
+
+	var tickers []UnifiedTickerInfoCMC
+	for _, pair := range cmcResponse.Data.MarketPairs {
+		// Нас цікавлять тільки пари до USDT
+		if strings.ToUpper(pair.QuoteSymbol) != "USDT" {
+			continue
+		}
+
+		priceData, ok := pair.Quote["USD"]
+		if !ok || priceData.Price <= 0 { // Перевіряємо, чи є дані про ціну і чи вона позитивна
+			// log.Printf("CoinMarketCap: Пропуск пари %s/%s на біржі %s через відсутність або нульову ціну в USD.", pair.BaseSymbol, pair.QuoteSymbol, pair.Exchange.Name)
+			continue
+		}
+		
+		// Важливо: BaseSymbol та QuoteSymbol можуть бути надійнішими, ніж парсинг MarketPair
+		baseCurrency := strings.ToUpper(pair.BaseSymbol)
+		quoteCurrency := strings.ToUpper(pair.QuoteSymbol)
+
+		tickers = append(tickers, UnifiedTickerInfoCMC{
+			ExchangeName:       pair.Exchange.Name,
+			ExchangeIdentifier: pair.Exchange.Slug, // Використовуємо slug як біржовий ідентифікатор
+			BaseCurrency:       baseCurrency,
+			QuoteCurrency:      quoteCurrency,
+			PriceUSD:           priceData.Price,
+			Volume24hUSD:       priceData.Volume24h,
+			TrustScore:         "N/A", // Як і домовилися, поки "N/A"
+			TradeURL:           "",    // CMC зазвичай не надає прямих торгових URL
+		})
+	}
+	log.Printf("CoinMarketCap: Успішно отримано %d USDT тікерів для '%s' (CoinID: %d, Name: %s). Всього знайдено пар: %d. Credits використано: %d",
+		len(tickers), coinIdentifier, cmcResponse.Data.ID, cmcResponse.Data.Name, cmcResponse.Data.NumMarketPairs, cmcResponse.Status.CreditCount)
+	return tickers, nil
+}
