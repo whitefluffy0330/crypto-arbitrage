@@ -38,17 +38,19 @@ func main() {
 	}
 
 	var botUsername string = "[ім'я невідоме]"
-	// Спроба іншої перевірки для bot.Self
-	// bot.Self є типом *tgbotapi.User. Якщо він nil, доступ до полів призведе до паніки.
-	// Якщо він не nil, але дані не отримані, ID може бути 0.
-	if bot.Self != nil && bot.Self.ID != 0 { // Залишаємо цю перевірку, оскільки вона має бути правильною для вказівника
+	// ПРЯМА ПЕРЕВІРКА ПОЛЯ ID У bot.Self
+	// Якщо bot.Self було б nil, це призвело б до паніки в InitBot раніше.
+	// Якщо InitBot повернув bot, то bot.Self має бути ініціалізовано (навіть якщо поля порожні).
+	// Однак, якщо NewBotAPI з якоїсь причини повернуло bot з bot.Self == nil,
+	// а наша оновлена InitBot не відловила це (що малоймовірно з останньою версією InitBot),
+	// то ця перевірка все одно може бути проблемою.
+	// Але оскільки InitBot тепер має перевірку "if bot.Self == nil",
+	// ми можемо припустити, що якщо ми дійшли сюди, то bot.Self *не* nil.
+	if bot.Self.ID != 0 { // Якщо ID не нульовий, значить, дані отримані
 		botUsername = bot.Self.UserName
-	} else if bot.Self != nil && bot.Self.ID == 0 { // Додаткова умова, якщо Self не nil, але ID нульовий
-		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID == 0, хоча bot.Self не nil. Ім'я користувача буде '[ім'я невідоме]'. UserName з API: '%s'", bot.Self.UserName)
-		// botUsername залишається "[ім'я невідоме]"
-	} else if bot.Self == nil { // Якщо bot.Self все ж таки nil
-		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self є nil. Ім'я користувача буде '[ім'я невідоме]'. Перевірте токен або зв'язок з API Telegram.")
-		// botUsername залишається "[ім'я невідоме]"
+	} else {
+		// Якщо ID нульовий, але bot.Self не nil (що перевіряється в InitBot)
+		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID == 0. Ім'я користувача буде '[ім'я невідоме]'. UserName з API: '%s'. Перевірте токен.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
