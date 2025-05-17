@@ -189,48 +189,27 @@ func GetUserFundingThreshold(chatID int64) float64 {
 	return threshold
 }
 
-// InitBot ініціалізує та повертає екземпляр бота.
 func InitBot(token string) (*tgbotapi.BotAPI, error) {
 	log.Println("Спроба ініціалізації бота через tgbotapi.NewBotAPI...")
 	if token == "" {
 		return nil, fmt.Errorf("токен бота порожній, перевірте змінну середовища TELEGRAM_TOKEN")
 	}
-	bot, err := tgbotapi.NewBotAPI(token) // bot тут *tgbotapi.BotAPI
+	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		log.Printf("Помилка tgbotapi.NewBotAPI: %v", err)
 		return nil, fmt.Errorf("не вдалося створити BotAPI: %w", err)
 	}
 
-	// bot.Self є *tgbotapi.User. Спочатку перевіряємо, чи він не nil.
-	if bot.Self == nil { // <--- Ця перевірка тепер перша
+	if bot.Self == nil {
 		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot.Self є nil після NewBotAPI. Можливо, невалідний токен або серйозна проблема з API Telegram.")
 		return nil, fmt.Errorf("bot.Self is nil after NewBotAPI, token might be invalid or Telegram API issue")
 	}
-
-	// Тепер, коли ми знаємо, що bot.Self не nil, можна безпечно доступатися до його полів.
-	// Однак, для уникнення помилки "mismatched types" у main.go, яка дуже дивна,
-	// давайте зробимо цю перевірку ще більш обережною, хоча вона не мала б бути проблемою.
-	// Ця помилка компіляції "mismatched types tgbotapi.User and untyped nil" для "bot.Self == nil"
-	// виникає в telegram.go, а не в main.go, отже, проблема саме тут.
-	// Давайте тимчасово спробуємо інший підхід, хоча він менш ідіоматичний для вказівників.
-	// Ми покладаємося на те, що якщо bot.Self не nil, то доступ до ID безпечний.
-	// Якщо ж проблема з типами продовжується, це може бути глибша проблема з залежностями/середовищем.
-
-	// Повернемося до простої перевірки ID, якщо Self не nil (як передбачалося раніше).
-	// Помилка "invalid operation: bot.Self == nil (mismatched types tgbotapi.User and untyped nil)"
-	// означає, що компілятор з якоїсь причини не вважає bot.Self вказівником *tgbotapi.User
-	// або має конфлікт з типом nil для цього порівняння.
-
-	// Давайте спробуємо так:
-	var selfUser tgbotapi.User
-	if bot.Self != nil { // Якщо компілятор все ще свариться на це, проблема не в логіці
-		selfUser = *bot.Self // Розіменування, якщо не nil
-	}
-
-	if selfUser.ID == 0 { // Перевіряємо ID розіменованого користувача
-		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI. UserName: '%s'. Перевірте токен.", selfUser.UserName)
+	
+	// Якщо ми тут, bot.Self не nil. Тепер перевіряємо ID.
+	if bot.Self.ID == 0 {
+		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI (bot.Self не nil). UserName: '%s'. Перевірте токен.", bot.Self.UserName)
 	} else {
-		log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", selfUser.ID, selfUser.UserName)
+		log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
 	}
 	return bot, nil
 }
@@ -244,7 +223,6 @@ func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *g
 	log.Println("Зупинено обробку оновлень Telegram (канал закрито).")
 }
 
-// SetWebhook встановлює вебхук для бота.
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
 	if webhookBaseURL == "" || webhookPath == "" {
 		log.Println("ПОПЕРЕДЖЕННЯ: WebhookBaseURL або WebhookPath не вказані. Вебхук не буде встановлено.")
@@ -258,25 +236,18 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	}
 
 	var whCfg tgbotapi.WebhookConfig
-	// var errWebhookSetup error // ВИДАЛЕНО, оскільки NewWebhook... не повертає помилку
 
 	if certFilePath != "" {
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
 		fileBytes := tgbotapi.FilePath(certFilePath)
-		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes) // Повертає тільки WebhookConfig
+		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes)
 	} else {
 		log.Printf("Спроба встановити вебхук без файлу сертифіката (Nginx має обробляти SSL).")
-		whCfg = tgbotapi.NewWebhook(fullWebhookURL) // Повертає тільки WebhookConfig
+		whCfg = tgbotapi.NewWebhook(fullWebhookURL)
 	}
 
-	// ВИДАЛЕНО блок перевірки errWebhookSetup, оскільки його немає
-	// if errWebhookSetup != nil {
-	// 	log.Printf("ПОМИЛКА конфігурації вебхука при виклику NewWebhook...: %v", errWebhookSetup)
-	// 	return fmt.Errorf("помилка конфігурації вебхука NewWebhook...: %w", errWebhookSetup)
-	// }
-
 	whCfg.MaxConnections = 40
-	_, err := bot.Request(whCfg) // Помилка може виникнути тут
+	_, err := bot.Request(whCfg)
 	if err != nil {
 		log.Printf("ПОМИЛКА встановлення вебхука '%s': %v", fullWebhookURL, err)
 		return fmt.Errorf("bot.Request(webhook setup) failed: %w", err)
