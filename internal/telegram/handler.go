@@ -41,7 +41,7 @@ func requestAndLog(bot *tgbotapi.BotAPI, c tgbotapi.CallbackConfig, commandName 
 }
 
 func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery, chatID int64, exchangeName, exchangeCallbackPrefix string) {
-	// ... (Код з відповіді #323 без змін) ...
+	// ... (код цієї функції без змін з відповіді #323) ...
 	log.Printf("Обробка запиту фандингу для біржі: %s (ChatID: %d)", exchangeName, chatID)
 
 	answerCallback := tgbotapi.NewCallback(query.ID, fmt.Sprintf("Завантажую ставки з %s...", exchangeName))
@@ -219,7 +219,6 @@ func handleFundingExchangeSelection(bot *tgbotapi.BotAPI, query *tgbotapi.Callba
 
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
 	if update.CallbackQuery != nil {
-		// ... (код обробки callback без змін з відповіді #319) ...
 		chatID := update.CallbackQuery.Message.Chat.ID
 		userName := update.CallbackQuery.From.UserName
 		callbackData := update.CallbackQuery.Data
@@ -328,7 +327,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 
 	switch currentState {
-	// ... (кейси для StateAwaiting... без змін з відповіді #319) ...
 	case StateAwaitingGoalInput:
 		HandleGoalInput(bot, update.Message, srv, cfg)
 		SetUserState(chatID, StateDefault)
@@ -365,7 +363,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 
 	if strings.HasPrefix(msgText, "/set_funding_threshold") {
-		// ... (код без змін з відповіді #319) ...
 		log.Printf("Обробка команди /set_funding_threshold для ChatID %d.", chatID)
 		parts := strings.Fields(msgText)
 		if len(parts) == 2 {
@@ -404,7 +401,6 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 	}
 
 	switch msgText {
-	// ... (кейси для кнопок без змін з відповіді #319, АЛЕ ВИКЛИК SPREADS ЗМІНЕНО) ...
 	case keyboard.BtnWorkStart, "/start":
 		commands.StartWork(bot, update.Message, srv, cfg)
 		keyboard.ShowMainKeyboard(bot, chatID)
@@ -473,7 +469,7 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 
 	case keyboard.BtnSpreads, "/spreads": 
 		log.Printf("Обробка '%s' для ChatID %d.", msgText, chatID)
-		// Надсилаємо початкове повідомлення і передаємо його ID в HandleSpreadsCommand
+		
 		initialReply := tgbotapi.NewMessage(chatID, "⏳ Розпочато пошук спредів. Це може зайняти кілька хвилин. Я повідомлю про результат.")
 		sentInitialMsg, errInitial := bot.Send(initialReply)
 		var initialMsgID int
@@ -482,7 +478,8 @@ func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Ser
 		} else {
 			log.Printf("Спреди: Не вдалося надіслати початкове повідомлення 'Розпочато пошук...': %v", errInitial)
 		}
-		go HandleSpreadsCommand(bot, chatID, cfg, initialMsgID) // ВИПРАВЛЕНО: передаємо initialMsgID
+		// ВИПРАВЛЕНО: Передаємо initialMsgID
+		go HandleSpreadsCommand(bot, chatID, cfg, initialMsgID) 
 		
 		keyboard.ShowMainKeyboard(bot, chatID) 
 		return 
