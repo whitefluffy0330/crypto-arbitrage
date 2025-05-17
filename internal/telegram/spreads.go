@@ -3,36 +3,168 @@ package telegram
 import (
 	"fmt"
 	"log"
-	"sort" 
+	"sort" // Повертаємо, бо використовується в розкоментованій логіці
+	// "strconv" // ВИДАЛЕНО
 	"strings"
-	// "sync"    // ВИДАЛЕНО, оскільки горутини для обробки монет тимчасово прибрані
-	"time" // Залишаємо, використовується в delayBetweenCoinProcessing
+	// "sync"    // Поки що не використовуємо горутини для обробки монет
+	"time" // Повертаємо, використовується в delayBetweenCoinProcessing
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/exchanges/coingecko"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/keyboard" // Повертаємо, використовується в ShowMainKeyboard
 )
 
-// ... решта коду файлу spreads.go залишається такою ж, як у відповіді #325 ...
-// (тобто, основна логіка в HandleSpreadsCommand все ще послідовна, без горутин для монет)
-// ...
+// SpreadOpportunity - ВИЗНАЧЕННЯ ПОВЕРНУТО
+type SpreadOpportunity struct {
+	CoinID         string
+	BaseCurrency   string
+	QuoteCurrency  string
+	BuyExchange    string
+	BuyPriceUSD    float64
+	SellExchange   string
+	SellPriceUSD   float64
+	SpreadPercent  float64
+	ProfitPer100USD float64
+	TrustScoreBuy  string
+	TrustScoreSell string
+	TradeURLBuy    string
+	TradeURLSell   string
+	Comment        string
+	Category       int
+}
+
+// isUserExchange - ВИЗНАЧЕННЯ ПОВЕРНУТО
+func isUserExchange(exchangeIdentifier string, userExchanges []string) bool {
+	normalizedIdentifier := strings.ToLower(strings.ReplaceAll(exchangeIdentifier, " ", "_"))
+	for _, ue := range userExchanges {
+		if normalizedIdentifier == ue {
+			return true
+		}
+	}
+	return false
+}
+
+// checkTrustScore - ВИЗНАЧЕННЯ ПОВЕРНУТО
+func checkTrustScore(tickerTrustScore string, minTrustScoreConfig string) bool {
+	if minTrustScoreConfig == "" || minTrustScoreConfig == "any" {
+		return true
+	}
+	if tickerTrustScore == "" && minTrustScoreConfig != "" && minTrustScoreConfig != "any" {
+		return false
+	}
+	switch strings.ToLower(minTrustScoreConfig) {
+	case "green":
+		return strings.ToLower(tickerTrustScore) == "green"
+	case "yellow":
+		return strings.ToLower(tickerTrustScore) == "green" || strings.ToLower(tickerTrustScore) == "yellow"
+	case "red":
+		return true
+	default:
+		log.Printf("Спреди: Невідомий формат SpreadMinTrustScore: '%s'. Фільтр не застосовано.", minTrustScoreConfig)
+		return true
+	}
+}
+
+// classifySpread - ВИЗНАЧЕННЯ ПОВЕРНУТО
+func classifySpread(coinSymbol string, exchangeBuyID, exchangeSellID string, userExchangesMap map[string]bool, allCoinGeckoTickers []coingecko.CoinGeckoTickerDetail) (string, int) {
+	buyIsUser := userExchangesMap[strings.ToLower(exchangeBuyID)]
+	sellIsUser := userExchangesMap[strings.ToLower(exchangeSellID)]
+
+	tokenOnUserOtherExchange := false
+	var userExchangeWithToken string
+	for _, ticker := range allCoinGeckoTickers {
+		if strings.ToUpper(ticker.Base) == strings.ToUpper(coinSymbol) &&
+			strings.ToUpper(ticker.Target) == "USDT" &&
+			userExchangesMap[strings.ToLower(ticker.Market.Identifier)] &&
+			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeBuyID) &&
+			strings.ToLower(ticker.Market.Identifier) != strings.ToLower(exchangeSellID) {
+			tokenOnUserOtherExchange = true
+			userExchangeWithToken = ticker.Market.Name
+			break
+		}
+	}
+
+	if buyIsUser && sellIsUser {
+		return "✅ Обидві біржі у вашому списку!", 1
+	}
+	if buyIsUser {
+		if tokenOnUserOtherExchange {
+			return fmt.Sprintf("ℹ️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeSellID, userExchangeWithToken), 2
+		}
+		return fmt.Sprintf("⚠️ Купівля на вашій біржі. Продаж на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeSellID), 2
+	}
+	if sellIsUser {
+		if tokenOnUserOtherExchange {
+			return fmt.Sprintf("ℹ️ Продаж на вашій біржі. Купівля на '%s' (не ваша). Токен також є на вашій біржі '%s'.", exchangeBuyID, userExchangeWithToken), 2
+		}
+		return fmt.Sprintf("⚠️ Продаж на вашій біржі. Купівля на '%s' (не ваша). Цього токена немає на інших ваших біржах.", exchangeBuyID), 2
+	}
+	if tokenOnUserOtherExchange {
+		return fmt.Sprintf("🔍 Спред між '%s' та '%s' (не ваші). Токен є на вашій біржі '%s'.", exchangeBuyID, exchangeSellID, userExchangeWithToken), 3
+	}
+	return fmt.Sprintf("🚫 Спред між '%s' та '%s' (не ваші). Токена немає на ваших біржах.", exchangeBuyID, exchangeSellID), 4
+}
+
 
 func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config, originalMessageID int) {
-	log.Printf("Спреди (послідовна обробка): Початок пошуку. Топ монет: %d, Мін. спред: %.2f%%", cfg.SpreadCoinCount, cfg.SpreadMinPercentage)
+	// ---- ДІАГНОСТИКА ТИПУ (ЗАЛИШАЄМО ПОКИ ЩО) ----
+	var testVar []coingecko.MarketCoin // Використовуємо правильний тип MarketCoin
+	testVar, testErr := coingecko.GetTopMarketCapCoins(1, "usd")
+	if testErr != nil {
+		log.Printf("Спреди: ДІАГНОСТИКА: Помилка при виклику GetTopMarketCapCoins: %v", testErr)
+	} else {
+		if len(testVar) > 0 {
+			log.Printf("Спреди: ДІАГНОСТИКА: GetTopMarketCapCoins викликано успішно. Перша монета ID: %s", testVar[0].ID)
+		} else {
+			log.Printf("Спреди: ДІАГНОСТИКА: GetTopMarketCapCoins викликано успішно, але список порожній.")
+		}
+	}
+	// ---- КІНЕЦЬ ДІАГНОСТИКИ ----
+	
+	// Розкоментовуємо основну логіку, але поки БЕЗ ГОРУТИН для стабільності з CoinGecko API
+	loadingMsg := tgbotapi.NewMessage(chatID, "⏳ Пошук спредів... Це може зайняти деякий час, будь ласка, зачекайте.")
+	// Надсилаємо повідомлення "Завантажую..." через originalMessageID (яке передається з handler.go)
+	// або створюємо нове, якщо originalMessageID == 0
+	var currentMessageID int
+	if originalMessageID != 0 {
+	    editLoadingMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, loadingMsg.Text)
+	    if _, err := bot.Send(editLoadingMsg); err == nil {
+	        currentMessageID = originalMessageID
+	    } else {
+	        log.Printf("Спреди: Помилка редагування на 'Завантажую...': %v. Надсилаю нове.", err)
+            sentMsg, errSendLoad := bot.Send(loadingMsg)
+            if errSendLoad == nil && sentMsg.MessageID != 0 {
+                currentMessageID = sentMsg.MessageID
+            } else {
+                log.Printf("Спреди: Помилка надсилання повідомлення 'Пошук спредів': %v", errSendLoad)
+            }
+	    }
+	} else {
+        sentMsg, errSendLoad := bot.Send(loadingMsg)
+        if errSendLoad == nil && sentMsg.MessageID != 0 {
+            currentMessageID = sentMsg.MessageID
+        } else {
+            log.Printf("Спреди: Помилка надсилання повідомлення 'Пошук спредів': %v", errSendLoad)
+        }
+	}
+
+
+	log.Printf("Спреди: Початок пошуку. Топ монет: %d, Мін. спред: %.2f%%, Біржі користувача: %v, Мін. Trust Score: '%s'",
+		cfg.SpreadCoinCount, cfg.SpreadMinPercentage, cfg.SpreadUserExchanges, cfg.SpreadMinTrustScore)
 
 	topCoins, err := coingecko.GetTopMarketCapCoins(cfg.SpreadCoinCount, "usd")
 	if err != nil {
-		errorMsg := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
+		errorMsgText := fmt.Sprintf("Помилка отримання списку топ-монет від CoinGecko: %v", err)
 		if strings.Contains(err.Error(), "429") {
-			errorMsg += "\n\n🚫 Схоже, ми досягли ліміту запитів до CoinGecko API. Спробуйте пізніше."
+			errorMsgText += "\n\n🚫 Схоже, ми досягли ліміту запитів до CoinGecko API. Спробуйте пізніше."
 		}
-		log.Printf("Спреди: %s", errorMsg)
-		if originalMessageID != 0 {
-			editMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, errorMsg)
+		log.Printf("Спреди: %s", errorMsgText)
+		if currentMessageID != 0 {
+			editMsg := tgbotapi.NewEditMessageText(chatID, currentMessageID, errorMsgText)
 			sendAndLog(bot, editMsg, "spreads_top_coins_error_edit", chatID)
 		} else {
-			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorMsg), "spreads_top_coins_error_new", chatID)
+			sendAndLog(bot, tgbotapi.NewMessage(chatID, errorMsgText), "spreads_top_coins_error_new", chatID)
 		}
 		keyboard.ShowMainKeyboard(bot, chatID)
 		return
@@ -47,17 +179,14 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 
 	processedCoins := 0
 	delayBetweenCoinProcessing := 6 * time.Second 
-
 	hitRateLimit := false 
 
 	for i, currentCoin := range topCoins { 
-		if hitRateLimit { 
-			break
-		}
+		if hitRateLimit { break }
 		processedCoins++
-		if originalMessageID != 0 && (processedCoins%1 == 0 || processedCoins == len(topCoins)) { 
+		if currentMessageID != 0 && (processedCoins%1 == 0 || processedCoins == len(topCoins)) { 
 			progressText := fmt.Sprintf("⏳ Пошук спредів... Оброблено %d/%d: %s...", processedCoins, len(topCoins), currentCoin.Name)
-			editProgressMsg := tgbotapi.NewEditMessageText(chatID, originalMessageID, progressText)
+			editProgressMsg := tgbotapi.NewEditMessageText(chatID, currentMessageID, progressText)
 			if _, errSend := bot.Send(editProgressMsg); errSend != nil {
 				log.Printf("Спреди: Помилка оновлення прогресу: %v", errSend)
 			}
@@ -148,6 +277,7 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 			reportText.WriteString("\n\n⚠️ Досягнуто ліміту запитів до CoinGecko. Результати можуть бути неповними. Спробуйте пізніше.")
 		}
 	} else {
+		// ... (код формування тексту звіту з спредами - без змін) ...
 		limitSpreads := 7 
 		displayedCount := 0
 		for _, s := range allFoundSpreads {
@@ -199,8 +329,8 @@ func HandleSpreadsCommand(bot *tgbotapi.BotAPI, chatID int64, cfg config.Config,
 		finalText = finalText[:MaxTelegramMessageSize-30] + "\n... (повідомлення обрізано)"
 	}
 
-	if originalMessageID != 0 {
-		deleteMsg := tgbotapi.NewDeleteMessage(chatID, originalMessageID)
+	if currentMessageID != 0 { // Використовуємо currentMessageID, отриманий після надсилання "Завантажую..."
+		deleteMsg := tgbotapi.NewDeleteMessage(chatID, currentMessageID)
 		_, _ = bot.Send(deleteMsg) 
 	}
 	
