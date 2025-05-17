@@ -200,16 +200,22 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) {
 		return nil, fmt.Errorf("не вдалося створити BotAPI: %w", err)
 	}
 
-	if bot.Self == nil {
+	// УВАГА: Змінена логіка перевірки bot.Self для уникнення помилки компіляції
+	// Ми покладаємося на те, що якщо NewBotAPI не повернув помилку, то bot != nil.
+	// Якщо bot.Self (що є *tgbotapi.User) = nil, то доступ до bot.Self.ID викличе паніку.
+	// Якщо помилка "mismatched types" продовжується, це вказує на глибшу проблему.
+	if bot != nil && bot.Self != nil { // Спочатку перевіряємо bot, потім bot.Self
+		if bot.Self.ID == 0 {
+			log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI (bot.Self не nil). UserName: '%s'. Перевірте токен.", bot.Self.UserName)
+		} else {
+			log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
+		}
+	} else if bot != nil && bot.Self == nil { // Якщо bot є, але Self - ні.
 		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot.Self є nil після NewBotAPI. Можливо, невалідний токен або серйозна проблема з API Telegram.")
 		return nil, fmt.Errorf("bot.Self is nil after NewBotAPI, token might be invalid or Telegram API issue")
-	}
-	
-	// Якщо ми тут, bot.Self не nil. Тепер перевіряємо ID.
-	if bot.Self.ID == 0 {
-		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI (bot.Self не nil). UserName: '%s'. Перевірте токен.", bot.Self.UserName)
-	} else {
-		log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
+	} else { // Це не мало б статися, якщо NewBotAPI не повернув err
+		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot є nil, хоча NewBotAPI не повернув помилку. Це непередбачена ситуація.")
+		return nil, fmt.Errorf("bot is nil after NewBotAPI without an error, unexpected situation")
 	}
 	return bot, nil
 }
@@ -236,14 +242,15 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	}
 
 	var whCfg tgbotapi.WebhookConfig
+	// var errWebhookSetup error // Ця змінна не потрібна, NewWebhook... не повертає помилку
 
 	if certFilePath != "" {
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
 		fileBytes := tgbotapi.FilePath(certFilePath)
-		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes)
+		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes) // Повертає тільки WebhookConfig
 	} else {
 		log.Printf("Спроба встановити вебхук без файлу сертифіката (Nginx має обробляти SSL).")
-		whCfg = tgbotapi.NewWebhook(fullWebhookURL)
+		whCfg = tgbotapi.NewWebhook(fullWebhookURL) // Повертає тільки WebhookConfig
 	}
 
 	whCfg.MaxConnections = 40
