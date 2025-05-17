@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" // <--- ДОДАНО ПРАВИЛЬНИЙ ІМПОРТ
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // <--- ВИДАЛЕНО НЕВИКОРИСТОВУВАНИЙ ІМПОРТ
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
@@ -39,14 +38,20 @@ func main() {
 	}
 
 	var botUsername string = "[ім'я невідоме]"
-	// bot.Self є *tgbotapi.User, тому порівняння з nil коректне.
-	// Якщо bot.Self != nil, тоді можна безпечно доступатися до bot.Self.ID
-	if bot.Self != nil && bot.Self.ID != 0 {
+	// Спроба іншої перевірки для bot.Self
+	// bot.Self є типом *tgbotapi.User. Якщо він nil, доступ до полів призведе до паніки.
+	// Якщо він не nil, але дані не отримані, ID може бути 0.
+	if bot.Self != nil && bot.Self.ID != 0 { // Залишаємо цю перевірку, оскільки вона має бути правильною для вказівника
 		botUsername = bot.Self.UserName
-	} else {
-		log.Printf("ПОПЕРЕДЖЕННЯ: Не вдалося отримати коректний ID або bot.Self є nil. Ім'я користувача буде '[ім'я невідоме]'. Перевірте токен або зв'язок з API Telegram.")
+	} else if bot.Self != nil && bot.Self.ID == 0 { // Додаткова умова, якщо Self не nil, але ID нульовий
+		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID == 0, хоча bot.Self не nil. Ім'я користувача буде '[ім'я невідоме]'. UserName з API: '%s'", bot.Self.UserName)
+		// botUsername залишається "[ім'я невідоме]"
+	} else if bot.Self == nil { // Якщо bot.Self все ж таки nil
+		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self є nil. Ім'я користувача буде '[ім'я невідоме]'. Перевірте токен або зв'язок з API Telegram.")
+		// botUsername залишається "[ім'я невідоме]"
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
+
 
 	webhookPath := cfg.WebhookPath
 	if !strings.HasPrefix(webhookPath, "/") && webhookPath != "" {
@@ -70,7 +75,7 @@ func main() {
 	}
 	log.Println("Клієнт Google Sheets успішно створено.")
 
-	var updatesChannel tgbotapi.UpdatesChannel // Тепер tgbotapi визначено
+	var updatesChannel tgbotapi.UpdatesChannel
 	if webhookPath != "" {
 		updatesChannel = bot.ListenForWebhook(webhookPath)
 		go func() {
