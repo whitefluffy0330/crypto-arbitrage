@@ -8,7 +8,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Якщо sheets.SpreadsheetsScope тут не використовується
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Потрібен для sheets.SpreadsheetsScope
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
@@ -36,11 +36,10 @@ func main() {
 	}
 	
 	var botUsername string = "[ім'я невідоме]"
-	// Якщо InitBot відпрацював без помилки, ми припускаємо, що bot.Self доступний
 	if bot.Self.ID != 0 { 
 		botUsername = bot.Self.UserName
 	} else { 
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName: '%s'.", bot.Self.UserName)
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName з API: '%s'.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -55,8 +54,7 @@ func main() {
 	}
 
 	ctx := appContext()
-	// Використовуємо gsheets.SpreadsheetsScope напряму з офіційного пакета
-	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope) 
+	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
 	if err != nil {
 		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте GOOGLE_APPLICATION_CREDENTIALS.", err)
 	}
@@ -83,8 +81,7 @@ func main() {
 	}
 
 	if updatesChannel != nil {
-		// telegram.HandleUpdates має викликати вашу функцію з handler.go
-		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg) 
+		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg)
 	} else {
 		log.Println("Канал оновлень не ініціалізовано. Зупинка.")
 	}
