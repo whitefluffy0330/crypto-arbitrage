@@ -15,9 +15,6 @@ import (
 func CloseUserGoal(bot *tgbotapi.BotAPI, chatID int64, srv *gsheets.Service, cfg config.Config) { // <<< ЗМІНЕНО СИГНАТУРУ
 	var msgText string
 
-	// Викликаємо оновлену DeleteUserGoal, передаючи cfg
-	err := DeleteUserGoal(chatID, srv, cfg) // <<< ЗМІНЕНО ТУТ
-
 	if err != nil {
 		// Якщо виникла помилка при оновленні статусу в Google Sheet
 		// Використовуємо cfg.SheetNameUserGoals для більш інформативного повідомлення
