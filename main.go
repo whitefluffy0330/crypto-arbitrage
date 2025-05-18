@@ -10,6 +10,8 @@ import (
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Цей імпорт тут не потрібен, sheets.SpreadsheetsScope використовується в telegram.SetWebhook/InitBot, якщо там є логіка з sheets
+	// або в telegram.HandleUpdates, якщо sheetsService передається
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -33,20 +35,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	if bot == nil { // Додаткова перевірка, хоча InitBot має повернути помилку
+	if bot == nil {
 		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
 	}
 
 	var botUsername string = "[ім'я невідоме]"
-	// Після виправлень в InitBot, ми очікуємо, що bot.Self не буде nil, якщо InitBot не повернув помилку.
-	if bot.Self != nil && bot.Self.ID != 0 {
+	// Після змін в InitBot, ми покладаємося на те, що він або повернув помилку,
+	// або bot.Self.ID має якесь значення (можливо 0, якщо GetMe не вдалося).
+	if bot.Self.ID != 0 {
 		botUsername = bot.Self.UserName
-	} else if bot.Self != nil && bot.Self.ID == 0 {
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0, хоча bot.Self не nil. Ім'я користувача буде '[ім'я невідоме]'. UserName з API: '%s'", bot.Self.UserName)
-	} else { // bot.Self == nil
-		log.Printf("КРИТИЧНА ПОМИЛКА (main.go): bot.Self є nil після telegram.InitBot, хоча InitBot не повернув помилку. Це не мало статися. Перевірте логіку InitBot.")
-		// Якщо InitBot не впорався з поверненням помилки, краще тут завершити роботу.
-		// return
+	} else {
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. Username: '%s'.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -55,15 +54,18 @@ func main() {
 		webhookPath = "/" + webhookPath
 	}
 
+	// Виклик SetWebhook з параметрами URL, шлях, шлях до сертифіката
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
 	if err != nil {
-		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v. Бот продовжить роботу, але вебхук може бути неактивним.", err)
+		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v.", err)
 	}
 
 	ctx := appContext()
-	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope)
+	// sheets.SpreadsheetsScope має бути визначено в пакеті sheets
+	// або використовуйте gsheets.SpreadsheetsScope безпосередньо, якщо це те саме
+	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope) // Використовуємо gsheets.SpreadsheetsScope
 	if err != nil {
-		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте змінну GOOGLE_APPLICATION_CREDENTIALS та доступність файлу credentials.json.", err)
+		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте GOOGLE_APPLICATION_CREDENTIALS.", err)
 	}
 
 	sheetsService, err := gsheets.NewService(ctx, option.WithCredentials(credentials))
@@ -79,17 +81,17 @@ func main() {
 			log.Printf("Запуск HTTP сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
 			err_http := http.ListenAndServe(cfg.WebhookListenAddr, nil)
 			if err_http != nil {
-				log.Fatalf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА для вебхука: %v", err_http)
+				log.Fatalf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА: %v", err_http)
 			}
 		}()
 		log.Printf("Бот @%s готовий до роботи (слухає на %s, очікує запити від Nginx на %s)...", botUsername, cfg.WebhookListenAddr, webhookPath)
 	} else {
-		log.Println("ПОПЕРЕДЖЕННЯ: WebhookPath не вказано в конфігурації. Бот не буде слухати вебхуки.")
+		log.Println("ПОПЕРЕДЖЕННЯ: WebhookPath не вказано. Вебхук не слухається.")
 	}
 
 	if updatesChannel != nil {
 		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg)
 	} else {
-		log.Println("Канал оновлень не ініціалізовано. Зупинка роботи (якщо не використовується polling).")
+		log.Println("Канал оновлень не ініціалізовано. Зупинка.")
 	}
 }
