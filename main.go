@@ -8,7 +8,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Потрібен для sheets.SpreadsheetsScope
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
@@ -36,10 +36,11 @@ func main() {
 	}
 	
 	var botUsername string = "[ім'я невідоме]"
+	// Припускаємо, що InitBot або заповнив bot.Self.ID, або ми використовуємо тимчасове ім'я
 	if bot.Self.ID != 0 { 
 		botUsername = bot.Self.UserName
 	} else { 
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName з API: '%s'.", bot.Self.UserName)
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName: '%s'.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -54,7 +55,7 @@ func main() {
 	}
 
 	ctx := appContext()
-	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
+	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope) // Використовуємо gsheets.SpreadsheetsScope
 	if err != nil {
 		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте GOOGLE_APPLICATION_CREDENTIALS.", err)
 	}
