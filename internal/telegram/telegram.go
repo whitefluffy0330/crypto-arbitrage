@@ -201,15 +201,17 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) {
 		return nil, fmt.Errorf("не вдалося створити BotAPI: %w", err)
 	}
 
-	// УВАГА: Цей блок перевірки bot.Self є ключовим.
-	// Якщо bot == nil, то NewBotAPI вже повернув би помилку.
-	// Тому тут ми перевіряємо bot.Self.
-	if bot.Self == nil { // Це рядок, який викликав помилку "mismatched types" (близько 203-207)
+	if bot == nil { // Додаткова перевірка самого об'єкта bot
+		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot є nil після NewBotAPI, хоча помилки не було. Це непередбачена ситуація.")
+		return nil, fmt.Errorf("bot is nil after NewBotAPI without an error, unexpected situation")
+	}
+
+	// Перевірка bot.Self (має бути *tgbotapi.User)
+	if bot.Self == nil { // ЦЕЙ РЯДОК МАЄ БУТИ БЕЗПЕЧНИМ ДЛЯ ПОРІВНЯННЯ
 		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot.Self є nil після NewBotAPI. Можливо, невалідний токен або серйозна проблема з API Telegram.")
 		return nil, fmt.Errorf("bot.Self is nil after NewBotAPI, token might be invalid or Telegram API issue")
 	}
-	
-	// Якщо ми дійшли сюди, bot.Self не nil. Тепер перевіряємо ID.
+
 	if bot.Self.ID == 0 {
 		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI (bot.Self не nil). UserName: '%s'. Перевірте токен.", bot.Self.UserName)
 	} else {
@@ -228,6 +230,7 @@ func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *g
 }
 
 // SetWebhook встановлює вебхук для бота.
+// ЦЯ ВЕРСІЯ ПРИПУСКАЄ, ЩО NewWebhook... ПОВЕРТАЄ ОДНУ ЗМІННУ (ЯК У v5.5.1)
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
 	if webhookBaseURL == "" || webhookPath == "" {
 		log.Println("ПОПЕРЕДЖЕННЯ: WebhookBaseURL або WebhookPath не вказані. Вебхук не буде встановлено.")
@@ -241,13 +244,12 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	}
 
 	var whCfg tgbotapi.WebhookConfig
-	// var errWebhookSetup error // Ця змінна не потрібна
 
-	if certFilePath != "" { // Це рядки, де були помилки "assignment mismatch" (близько 243, 250)
+	if certFilePath != "" {
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
 		fileBytes := tgbotapi.FilePath(certFilePath)
 		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes) // ПОВЕРТАЄ 1 ЗНАЧЕННЯ
-	} else { // Це рядки, де були помилки "assignment mismatch" (близько 246, 253)
+	} else {
 		log.Printf("Спроба встановити вебхук без файлу сертифіката (Nginx має обробляти SSL).")
 		whCfg = tgbotapi.NewWebhook(fullWebhookURL) // ПОВЕРТАЄ 1 ЗНАЧЕННЯ
 	}
