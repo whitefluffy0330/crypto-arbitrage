@@ -4,35 +4,28 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync" // Потрібен для userMutex та fundingThresholdMutex
+	"sync" // Був відсутній у вашому оригінальному telegram.go, але потрібен для м'ютексів
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Потрібен для KyivLocation у sheets та інших функцій
-	gsheets "google.golang.org/api/sheets/v4"                     // Аліас для офіційного пакета Sheets
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	gsheets "google.golang.org/api/sheets/v4" // Додано аліас для офіційного пакета
 )
 
-// UserState представляє поточний стан діалогу користувача
-type UserState string // Змінено з константи на тип для більшої гнучкості, якщо потрібно
+var KyivLocation *time.Location
 
-const (
-	StateDefault                 UserState = "" // Використовуємо тип UserState
-	StateAwaitingGoalInput       UserState = "awaiting_goal_input"
-	StateAwaitingInvestmentInput UserState = "awaiting_investment_input"
-	StateAwaitingFundingThreshold UserState = "awaiting_funding_threshold"
-)
+func init() {
+	loc, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		log.Printf("Крит. помилка telegram: не вдалося завантажити часову зону 'Europe/Kyiv': %v.", err)
+		KyivLocation = time.UTC
+	} else {
+		KyivLocation = loc
+		log.Println("Часову зону Europe/Kyiv завантажено (telegram).")
+	}
+}
 
-var userStates = make(map[int64]UserState)
-
-// userMutex був визначений у вашому оригінальному коді, але не використовувався.
-// Якщо він потрібен для userStates, потрібно додати блокування.
-// Для простоти поки що без нього, якщо не було явних проблем.
-// Якщо userStates модифікується з різних горутин, userMutex потрібен.
-// Згідно з вашим оригінальним кодом, userMutex був &sync.Mutex{}
-var userStatesMutex sync.RWMutex // Використовуємо RWMutex, як для userGoals
-
-// FinancialGoal - структура для зберігання інформації про фінансову ціль користувача.
 type FinancialGoal struct {
 	Amount       float64
 	Currency     string
@@ -43,33 +36,30 @@ type FinancialGoal struct {
 
 var (
 	userGoals      = make(map[int64]FinancialGoal)
-	userGoalsMutex sync.RWMutex
+	userGoalsMutex sync.RWMutex // Змінено на RWMutex для консистентності з іншими
 )
 
-var userFundingThresholds = make(map[int64]float64)
-var fundingThresholdMutex sync.RWMutex // Використовуємо RWMutex, як для userGoals
+var (
+	userStates      = make(map[int64]string) // Використовуємо string, як у вашому оригінальному коді
+	userStatesMutex sync.RWMutex // Змінено на RWMutex
+)
+
+const (
+	StateDefault                 = ""
+	StateAwaitingGoalInput       = "awaiting_goal_input"
+	StateAwaitingInvestmentInput = "awaiting_investment_input"
+	StateAwaitingFundingThreshold = "awaiting_funding_threshold"
+)
+
+var (
+	userFundingThresholds      = make(map[int64]float64)
+	userFundingThresholdsMutex sync.RWMutex // Змінено на RWMutex
+)
 
 const defaultFundingThreshold = 0.0005
 
-var KyivLocation *time.Location
-
-func init() {
-	loc, err := time.LoadLocation("Europe/Kyiv")
-	if err != nil {
-		log.Printf("Помилка завантаження часової зони Europe/Kyiv: %v. Використовується UTC.", err)
-		KyivLocation = time.UTC
-	} else {
-		KyivLocation = loc
-		log.Println("Часову зону Europe/Kyiv завантажено (telegram).")
-	}
-	// Ініціалізація userStates та userFundingThresholds, якщо вони не ініціалізуються при оголошенні
-	// userStates = make(map[int64]UserState) // Вже зроблено при оголошенні
-	// userFundingThresholds = make(map[int64]float64) // Вже зроблено при оголошенні
-}
-
-// SetUserState встановлює стан для користувача
-func SetUserState(chatID int64, state UserState) {
-	userStatesMutex.Lock() // Використовуємо RWMutex
+func SetUserState(chatID int64, state string) {
+	userStatesMutex.Lock()
 	defer userStatesMutex.Unlock()
 	if state == StateDefault {
 		delete(userStates, chatID)
@@ -79,9 +69,8 @@ func SetUserState(chatID int64, state UserState) {
 	log.Printf("Встановлено стан '%s' для ChatID %d", state, chatID)
 }
 
-// GetUserState повертає стан для користувача
-func GetUserState(chatID int64) UserState {
-	userStatesMutex.RLock() // Використовуємо RWMutex
+func GetUserState(chatID int64) string {
+	userStatesMutex.RLock()
 	defer userStatesMutex.RUnlock()
 	state, exists := userStates[chatID]
 	if !exists {
@@ -90,63 +79,6 @@ func GetUserState(chatID int64) UserState {
 	return state
 }
 
-func SetUserFundingThreshold(chatID int64, threshold float64) {
-	fundingThresholdMutex.Lock()
-	defer fundingThresholdMutex.Unlock()
-	userFundingThresholds[chatID] = threshold
-	log.Printf("Встановлено поріг фандингу %.4f%% для ChatID %d", threshold*100, chatID)
-}
-
-func GetUserFundingThreshold(chatID int64) float64 {
-	fundingThresholdMutex.RLock() // Використовуємо RWMutex
-	defer fundingThresholdMutex.RUnlock()
-	if threshold, ok := userFundingThresholds[chatID]; ok {
-		log.Printf("Для ChatID %d використовується поріг фандингу %.4f%%", chatID, threshold*100)
-		return threshold
-	}
-	log.Printf("Для ChatID %d поріг фандингу не встановлено, використовується стандартний %.4f%%", chatID, defaultFundingThreshold*100)
-	return defaultFundingThreshold
-}
-
-
-// InitBot ініціалізує та повертає екземпляр бота.
-// Повертаємося до логіки перевірки ID, припускаючи, що bot та bot.Self не nil, якщо NewBotAPI не повернув помилку.
-func InitBot(token string) (*tgbotapi.BotAPI, error) {
-	log.Println("Спроба ініціалізації бота через tgbotapi.NewBotAPI...")
-	if token == "" {
-		return nil, fmt.Errorf("токен бота порожній, перевірте змінну середовища TELEGRAM_TOKEN")
-	}
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		log.Printf("Помилка tgbotapi.NewBotAPI: %v", err)
-		return nil, fmt.Errorf("не вдалося створити BotAPI: %w", err)
-	}
-
-	// Якщо NewBotAPI не повернув помилку, вважаємо, що bot != nil
-	// Якщо bot.Self буде nil, то bot.Self.ID викличе паніку.
-	// Ця логіка ближча до вашого оригінального коду.
-	// Якщо компілятор все ще скаржиться на "mismatched types" для "bot.Self == nil" в інших місцях,
-	// то це дійсно проблема інтерпретації типів.
-	if bot.Self.ID == 0 { // <--- Оригінальна перевірка (або близька до неї)
-		// Спробуємо обережно отримати UserName, якщо Self не nil, але ID = 0
-		var userNameForLog string
-		if bot.Self != nil { // Ця перевірка може викликати помилку компіляції, якщо проблема з типом
-			userNameForLog = bot.Self.UserName
-		} else {
-			userNameForLog = "[bot.Self є nil!]"
-			// Це критична ситуація, якщо bot.Self nil, а NewBotAPI не повернув помилку.
-			log.Printf("КРИТИЧНА ПОМИЛКА: bot.Self є nil після успішного NewBotAPI!")
-			return nil, fmt.Errorf("bot.Self is nil after NewBotAPI success, this should not happen")
-		}
-		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI. UserName: '%s'. Перевірте токен.", userNameForLog)
-	} else {
-		log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
-	}
-	return bot, nil
-}
-
-
-// ... (функції SetUserGoal, GetUserGoal, DeleteUserGoal, ClearInMemoryUserGoal залишаються як у відповіді №46)
 func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg config.Config) error {
 	activeGoal, isActive := GetUserGoal(chatID, srv, cfg)
 	if isActive {
@@ -160,7 +92,7 @@ func SetUserGoal(chatID int64, goal FinancialGoal, srv *gsheets.Service, cfg con
 	goalDataForSheet := sheets.FinancialGoalData{
 		Amount:       goal.Amount,
 		Currency:     goal.Currency,
-		Days:         0,
+		Days:         0, // Це поле було у вашому оригіналі, залишаємо
 		OriginalText: goal.OriginalText,
 		SetDate:      goal.SetDate,
 	}
@@ -238,46 +170,86 @@ func ClearInMemoryUserGoal(chatID int64) {
 	}
 }
 
+func SetUserFundingThreshold(chatID int64, threshold float64) {
+	userFundingThresholdsMutex.Lock()
+	defer userFundingThresholdsMutex.Unlock()
+	userFundingThresholds[chatID] = threshold
+	log.Printf("Встановлено поріг фандингу %.4f%% для ChatID %d", threshold*100, chatID)
+}
+
+func GetUserFundingThreshold(chatID int64) float64 {
+	userFundingThresholdsMutex.RLock()
+	defer userFundingThresholdsMutex.RUnlock()
+	threshold, exists := userFundingThresholds[chatID]
+	if !exists {
+		log.Printf("Для ChatID %d поріг фандингу не встановлено, використовується стандартний %.4f%%", chatID, defaultFundingThreshold*100)
+		return defaultFundingThreshold
+	}
+	log.Printf("Для ChatID %d використовується поріг фандингу %.4f%%", chatID, threshold*100)
+	return threshold
+}
+
+// InitBot ініціалізує та повертає екземпляр бота.
+func InitBot(token string) (*tgbotapi.BotAPI, error) {
+	log.Println("Спроба ініціалізації бота через tgbotapi.NewBotAPI...")
+	if token == "" {
+		return nil, fmt.Errorf("токен бота порожній, перевірте змінну середовища TELEGRAM_TOKEN")
+	}
+	bot, err := tgbotapi.NewBotAPI(token)
+	if err != nil {
+		log.Printf("Помилка tgbotapi.NewBotAPI: %v", err)
+		return nil, fmt.Errorf("не вдалося створити BotAPI: %w", err)
+	}
+
+	// Якщо NewBotAPI не повернув помилку, вважаємо, що bot != nil.
+	// Якщо bot.Self буде nil, наступний рядок викличе паніку.
+	// Це відповідає логіці вашого оригінального коду з коміту c230a60.
+	// Якщо компілятор скаржиться на "mismatched types tgbotapi.User and untyped nil" 
+	// при спробі додати "if bot.Self == nil", то це проблема інтерпретації типів.
+	if bot.Self.ID == 0 {
+		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI. UserName: '%s'. Перевірте токен.", bot.Self.UserName)
+	} else {
+		log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
+	}
+	return bot, nil
+}
+
 func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *gsheets.Service, cfg config.Config) {
 	log.Println("Розпочато обробку оновлень Telegram...")
 	for update := range updates {
-		go HandleUpdate(bot, update, srv, cfg)
+		go HandleUpdate(bot, update, srv, cfg) // Передаємо HandleUpdate з цього ж пакету
 	}
 	log.Println("Зупинено обробку оновлень Telegram (канал закрито).")
 }
 
 // SetWebhook встановлює вебхук для бота.
-// ЦЯ ВЕРСІЯ ПОВЕРТАЄТЬСЯ ДО ОЧІКУВАННЯ ДВОХ ЗНАЧЕНЬ ВІД NewWebhook...
+// Ця версія ВІДПОВІДАЄ ОРИГІНАЛЬНОМУ КОДУ з коміту c230a60,
+// де очікується, що NewWebhook... повертає (WebhookConfig, error).
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
-	if webhookBaseURL == "" || webhookPath == "" {
-		log.Println("ПОПЕРЕДЖЕННЯ: WebhookBaseURL або WebhookPath не вказані. Вебхук не буде встановлено.")
-		return nil
-	}
-
 	log.Printf("Встановлення вебхука: URL=%s%s, CertFile (якщо є)=%s", webhookBaseURL, webhookPath, certFilePath)
 	fullWebhookURL := webhookBaseURL + webhookPath
 	if !strings.HasPrefix(fullWebhookURL, "https://") {
-		log.Printf("ПОПЕРЕДЖЕННЯ: URL вебхука '%s' не починається з https://. Це може не спрацювати.", fullWebhookURL)
+		log.Printf("ПОПЕРЕДЖЕННЯ: URL вебхука '%s' не починається з https://.", fullWebhookURL)
 	}
 
 	var whCfg tgbotapi.WebhookConfig
-	var errWebhookSetup error // <--- ПОВЕРТАЄМО ЗМІННУ ДЛЯ ПОМИЛКИ
+	var errWebhookSetup error // Змінна для можливої помилки від NewWebhook...
 
 	if certFilePath != "" {
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
 		fileBytes := tgbotapi.FilePath(certFilePath)
-		whCfg, errWebhookSetup = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes) // <--- ОЧІКУЄМО ДВА ЗНАЧЕННЯ
+		whCfg, errWebhookSetup = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes)
 	} else {
-		log.Printf("Спроба встановити вебхук без файлу сертифіката (Nginx має обробляти SSL).")
-		whCfg, errWebhookSetup = tgbotapi.NewWebhook(fullWebhookURL) // <--- ОЧІКУЄМО ДВА ЗНАЧЕННЯ
+		log.Printf("Спроба встановити вебхук без файлу сертифіката.")
+		whCfg, errWebhookSetup = tgbotapi.NewWebhook(fullWebhookURL)
 	}
 
-	if errWebhookSetup != nil { // <--- ОБРОБЛЯЄМО ПОМИЛКУ ВІД NewWebhook...
+	if errWebhookSetup != nil {
 		log.Printf("ПОМИЛКА конфігурації вебхука при виклику NewWebhook...: %v", errWebhookSetup)
 		return fmt.Errorf("помилка конфігурації вебхука NewWebhook...: %w", errWebhookSetup)
 	}
 
-	whCfg.MaxConnections = 40
+	whCfg.MaxConnections = 40 // Це було у вашому оригінальному коді
 	_, err := bot.Request(whCfg) 
 	if err != nil {
 		log.Printf("ПОМИЛКА встановлення вебхука '%s': %v", fullWebhookURL, err)
@@ -326,19 +298,17 @@ func RemoveWebhook(bot *tgbotapi.BotAPI) error {
 	return nil
 }
 
-// HandleUpdate обробляє окреме оновлення.
-// Ця функція має бути реалізована у вашому файлі handler.go або тут, якщо вона проста.
-// Для прикладу, я додам заглушку.
+// Заглушка для HandleUpdate, якщо основна логіка в handler.go
 func HandleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, srv *gsheets.Service, cfg config.Config) {
-	// Тут буде ваша логіка обробки команд, повідомлень, callback'ів
-	// Наприклад, виклик функції з handler.go
-	// telegramHandler.HandleUpdate(bot, update, srv, cfg) // Якщо у вас є такий об'єкт/пакет
-	log.Printf("Отримано оновлення: %+v", update.UpdateID)
-
-	// Перевірка, чи це повідомлення, і чи є текст
-	if update.Message != nil && update.Message.Text != "" {
-		log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
-		// msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
-		// bot.Send(msg)
+	log.Printf("Отримано оновлення ID: %d (з telegram.go)", update.UpdateID)
+	// Тут має бути виклик функції з вашого пакету handler, наприклад:
+	// handler.ProcessUpdate(bot, update, srv, cfg)
+	// Або, якщо ваш handler.go містить функцію з такою ж назвою HandleUpdate,
+	// вам потрібно буде перейменувати одну з них або використовувати різні пакети.
+	// Поки що, для уникнення конфлікту імен, якщо у вас є handler.HandleUpdate,
+	// цю функцію можна було б назвати інакше або вона має викликати ту.
+	// Для простоти, я залишу тільки логування.
+	if update.Message != nil {
+		log.Printf("Повідомлення від %s: %s", update.Message.From.UserName, update.Message.Text)
 	}
 }
