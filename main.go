@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" // <--- ВАЖЛИВИЙ ІМПОРТ
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
@@ -36,8 +36,6 @@ func main() {
 	}
 	
 	var botUsername string = "[ім'я невідоме]"
-	// Після виправлень в InitBot (з відповіді #55 для telegram.go),
-	// ми очікуємо, що bot.Self не буде nil, якщо InitBot не повернув помилку.
 	if bot.Self != nil && bot.Self.ID != 0 { 
 		botUsername = bot.Self.UserName
 	} else if bot.Self != nil { 
@@ -52,7 +50,6 @@ func main() {
 		webhookPath = "/" + webhookPath
 	}
 
-	// Викликаємо telegram.SetWebhook з правильними аргументами
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
 	if err != nil {
 		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v. Бот продовжить роботу, але вебхук може бути неактивним.", err)
@@ -70,7 +67,7 @@ func main() {
 	}
 	log.Println("Клієнт Google Sheets успішно створено.")
 
-	var updatesChannel tgbotapi.UpdatesChannel // Тепер tgbotapi визначено
+	var updatesChannel tgbotapi.UpdatesChannel
 	if webhookPath != "" {
 		updatesChannel = bot.ListenForWebhook(webhookPath)
 		go func() {
