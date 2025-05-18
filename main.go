@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
@@ -30,18 +29,24 @@ func main() {
 		log.Fatal("Критична помилка: SPREADSHEET_ID не встановлено!")
 	}
 
-	bot, err := telegram.InitBot(cfg.BotToken) 
+	bot, err := telegram.InitBot(cfg.BotToken)
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	
+	if bot == nil { // Додаткова перевірка, хоча InitBot має повернути помилку
+		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
+	}
+
 	var botUsername string = "[ім'я невідоме]"
-	if bot.Self != nil && bot.Self.ID != 0 { 
+	// Після виправлень в InitBot, ми очікуємо, що bot.Self не буде nil, якщо InitBot не повернув помилку.
+	if bot.Self != nil && bot.Self.ID != 0 {
 		botUsername = bot.Self.UserName
-	} else if bot.Self != nil { 
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0, хоча bot.Self не nil. UserName з API: '%s'.", bot.Self.UserName)
-	} else { 
-		log.Printf("КРИТИЧНА ПОМИЛКА (main.go): bot.Self є nil після telegram.InitBot. Це не мало статися.")
+	} else if bot.Self != nil && bot.Self.ID == 0 {
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0, хоча bot.Self не nil. Ім'я користувача буде '[ім'я невідоме]'. UserName з API: '%s'", bot.Self.UserName)
+	} else { // bot.Self == nil
+		log.Printf("КРИТИЧНА ПОМИЛКА (main.go): bot.Self є nil після telegram.InitBot, хоча InitBot не повернув помилку. Це не мало статися. Перевірте логіку InitBot.")
+		// Якщо InitBot не впорався з поверненням помилки, краще тут завершити роботу.
+		// return
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -56,9 +61,9 @@ func main() {
 	}
 
 	ctx := appContext()
-	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
+	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope)
 	if err != nil {
-		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте змінну GOOGLE_APPLICATION_CREDENTIALS.", err)
+		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте змінну GOOGLE_APPLICATION_CREDENTIALS та доступність файлу credentials.json.", err)
 	}
 
 	sheetsService, err := gsheets.NewService(ctx, option.WithCredentials(credentials))
@@ -74,17 +79,17 @@ func main() {
 			log.Printf("Запуск HTTP сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
 			err_http := http.ListenAndServe(cfg.WebhookListenAddr, nil)
 			if err_http != nil {
-				log.Fatalf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА: %v", err_http)
+				log.Fatalf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА для вебхука: %v", err_http)
 			}
 		}()
 		log.Printf("Бот @%s готовий до роботи (слухає на %s, очікує запити від Nginx на %s)...", botUsername, cfg.WebhookListenAddr, webhookPath)
 	} else {
-		log.Println("ПОПЕРЕДЖЕННЯ: WebhookPath не вказано. Вебхук не слухається.")
+		log.Println("ПОПЕРЕДЖЕННЯ: WebhookPath не вказано в конфігурації. Бот не буде слухати вебхуки.")
 	}
 
 	if updatesChannel != nil {
 		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg)
 	} else {
-		log.Println("Канал оновлень не ініціалізовано. Зупинка.")
+		log.Println("Канал оновлень не ініціалізовано. Зупинка роботи (якщо не використовується polling).")
 	}
 }
