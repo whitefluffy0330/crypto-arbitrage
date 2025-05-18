@@ -8,7 +8,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Якщо sheets.SpreadsheetsScope тут не використовується
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
@@ -36,12 +36,11 @@ func main() {
 	}
 	
 	var botUsername string = "[ім'я невідоме]"
-	// Згідно з оновленою InitBot, ми покладаємося на те, що вона або повернула помилку,
-	// або bot.Self.ID має якесь значення (можливо 0, що буде залоговано в InitBot).
+	// Якщо InitBot відпрацював без помилки, ми припускаємо, що bot.Self доступний
 	if bot.Self.ID != 0 { 
 		botUsername = bot.Self.UserName
 	} else { 
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName з API: '%s'.", bot.Self.UserName)
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName: '%s'.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -50,16 +49,14 @@ func main() {
 		webhookPath = "/" + webhookPath
 	}
 
-	// Викликаємо telegram.SetWebhook з правильними аргументами, які очікує оновлена функція
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
 	if err != nil {
 		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v.", err)
 	}
 
 	ctx := appContext()
-	// Використовуємо sheets.SpreadsheetsScope, якщо він визначений у вашому пакеті internal/sheets
-	// або gsheets.SpreadsheetsScope, якщо потрібно напряму з google.golang.org/api/sheets/v4
-	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
+	// Використовуємо gsheets.SpreadsheetsScope напряму з офіційного пакета
+	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope) 
 	if err != nil {
 		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте GOOGLE_APPLICATION_CREDENTIALS.", err)
 	}
@@ -86,7 +83,8 @@ func main() {
 	}
 
 	if updatesChannel != nil {
-		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg)
+		// telegram.HandleUpdates має викликати вашу функцію з handler.go
+		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg) 
 	} else {
 		log.Println("Канал оновлень не ініціалізовано. Зупинка.")
 	}
