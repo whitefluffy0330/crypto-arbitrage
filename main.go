@@ -6,14 +6,14 @@ import (
 	"net/http"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" // Імпорт для tgbotapi.UpdatesChannel
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
-	gsheets "google.golang.org/api/sheets/v4"
+	gsheets "google.golang.org/api/sheets/v4" // Аліас для офіційного пакета Sheets
 )
 
 func appContext() context.Context { return context.Background() }
@@ -29,24 +29,22 @@ func main() {
 		log.Fatal("Критична помилка: SPREADSHEET_ID не встановлено!")
 	}
 
-	bot, err := telegram.InitBot(cfg.BotToken)
+	bot, err := telegram.InitBot(cfg.BotToken) 
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	if bot == nil { // Додаткова перевірка, хоча InitBot має повернути помилку
-		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
-	}
+	// На цьому етапі, якщо err == nil, то bot != nil і bot.Self != nil згідно з логікою InitBot
+	// у файлі internal/telegram/telegram.go (версія з відповіді #46)
 
 	var botUsername string = "[ім'я невідоме]"
-	// Після виправлень в InitBot, ми очікуємо, що bot.Self не буде nil, якщо InitBot не повернув помилку.
-	if bot.Self != nil && bot.Self.ID != 0 {
+	// Оскільки telegram.InitBot тепер має надійну перевірку bot.Self,
+	// ми можемо тут безпечно доступатися до bot.Self.ID, якщо попередня функція не повернула помилку.
+	if bot.Self.ID != 0 { 
 		botUsername = bot.Self.UserName
-	} else if bot.Self != nil && bot.Self.ID == 0 {
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0, хоча bot.Self не nil. Ім'я користувача буде '[ім'я невідоме]'. UserName з API: '%s'", bot.Self.UserName)
-	} else { // bot.Self == nil
-		log.Printf("КРИТИЧНА ПОМИЛКА (main.go): bot.Self є nil після telegram.InitBot, хоча InitBot не повернув помилку. Це не мало статися. Перевірте логіку InitBot.")
-		// Якщо InitBot не впорався з поверненням помилки, краще тут завершити роботу.
-		// return
+	} else { 
+		// Цей випадок (bot.Self.ID == 0, але bot.Self не nil) обробляється всередині InitBot
+		// Якщо InitBot пройшов, але ID все одно 0, це буде залоговано там.
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID все ще 0 після InitBot. UserName з API: '%s'.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -55,6 +53,7 @@ func main() {
 		webhookPath = "/" + webhookPath
 	}
 
+	// cfg.WebhookCertPath має бути порожнім, якщо Nginx обробляє TLS
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
 	if err != nil {
 		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v. Бот продовжить роботу, але вебхук може бути неактивним.", err)
