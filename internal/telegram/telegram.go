@@ -189,6 +189,7 @@ func GetUserFundingThreshold(chatID int64) float64 {
 	return threshold
 }
 
+// InitBot ініціалізує та повертає екземпляр бота.
 func InitBot(token string) (*tgbotapi.BotAPI, error) {
 	log.Println("Спроба ініціалізації бота через tgbotapi.NewBotAPI...")
 	if token == "" {
@@ -200,22 +201,19 @@ func InitBot(token string) (*tgbotapi.BotAPI, error) {
 		return nil, fmt.Errorf("не вдалося створити BotAPI: %w", err)
 	}
 
-	// УВАГА: Змінена логіка перевірки bot.Self для уникнення помилки компіляції
-	// Ми покладаємося на те, що якщо NewBotAPI не повернув помилку, то bot != nil.
-	// Якщо bot.Self (що є *tgbotapi.User) = nil, то доступ до bot.Self.ID викличе паніку.
-	// Якщо помилка "mismatched types" продовжується, це вказує на глибшу проблему.
-	if bot != nil && bot.Self != nil { // Спочатку перевіряємо bot, потім bot.Self
-		if bot.Self.ID == 0 {
-			log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI (bot.Self не nil). UserName: '%s'. Перевірте токен.", bot.Self.UserName)
-		} else {
-			log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
-		}
-	} else if bot != nil && bot.Self == nil { // Якщо bot є, але Self - ні.
+	// УВАГА: Цей блок перевірки bot.Self є ключовим.
+	// Якщо bot == nil, то NewBotAPI вже повернув би помилку.
+	// Тому тут ми перевіряємо bot.Self.
+	if bot.Self == nil { // Це рядок, який викликав помилку "mismatched types" (близько 203-207)
 		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot.Self є nil після NewBotAPI. Можливо, невалідний токен або серйозна проблема з API Telegram.")
 		return nil, fmt.Errorf("bot.Self is nil after NewBotAPI, token might be invalid or Telegram API issue")
-	} else { // Це не мало б статися, якщо NewBotAPI не повернув err
-		log.Printf("КРИТИЧНА ПОМИЛКА ІНІЦІАЛІЗАЦІЇ: bot є nil, хоча NewBotAPI не повернув помилку. Це непередбачена ситуація.")
-		return nil, fmt.Errorf("bot is nil after NewBotAPI without an error, unexpected situation")
+	}
+	
+	// Якщо ми дійшли сюди, bot.Self не nil. Тепер перевіряємо ID.
+	if bot.Self.ID == 0 {
+		log.Printf("ПОПЕРЕДЖЕННЯ: bot.Self.ID = 0 після NewBotAPI (bot.Self не nil). UserName: '%s'. Перевірте токен.", bot.Self.UserName)
+	} else {
+		log.Printf("Бот успішно ініціалізований: ID=%d, UserName='%s'", bot.Self.ID, bot.Self.UserName)
 	}
 	return bot, nil
 }
@@ -229,6 +227,7 @@ func HandleUpdates(updates tgbotapi.UpdatesChannel, bot *tgbotapi.BotAPI, srv *g
 	log.Println("Зупинено обробку оновлень Telegram (канал закрито).")
 }
 
+// SetWebhook встановлює вебхук для бота.
 func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string, certFilePath string) error {
 	if webhookBaseURL == "" || webhookPath == "" {
 		log.Println("ПОПЕРЕДЖЕННЯ: WebhookBaseURL або WebhookPath не вказані. Вебхук не буде встановлено.")
@@ -242,28 +241,28 @@ func SetWebhook(bot *tgbotapi.BotAPI, webhookBaseURL string, webhookPath string,
 	}
 
 	var whCfg tgbotapi.WebhookConfig
-	// var errWebhookSetup error // Ця змінна не потрібна, NewWebhook... не повертає помилку
+	// var errWebhookSetup error // Ця змінна не потрібна
 
-	if certFilePath != "" {
+	if certFilePath != "" { // Це рядки, де були помилки "assignment mismatch" (близько 243, 250)
 		log.Printf("Спроба встановити вебхук з файлом сертифіката: %s", certFilePath)
 		fileBytes := tgbotapi.FilePath(certFilePath)
-		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes) // Повертає тільки WebhookConfig
-	} else {
+		whCfg = tgbotapi.NewWebhookWithCert(fullWebhookURL, fileBytes) // ПОВЕРТАЄ 1 ЗНАЧЕННЯ
+	} else { // Це рядки, де були помилки "assignment mismatch" (близько 246, 253)
 		log.Printf("Спроба встановити вебхук без файлу сертифіката (Nginx має обробляти SSL).")
-		whCfg = tgbotapi.NewWebhook(fullWebhookURL) // Повертає тільки WebhookConfig
+		whCfg = tgbotapi.NewWebhook(fullWebhookURL) // ПОВЕРТАЄ 1 ЗНАЧЕННЯ
 	}
 
 	whCfg.MaxConnections = 40
-	_, err := bot.Request(whCfg)
+	_, err := bot.Request(whCfg) 
 	if err != nil {
 		log.Printf("ПОМИЛКА встановлення вебхука '%s': %v", fullWebhookURL, err)
 		return fmt.Errorf("bot.Request(webhook setup) failed: %w", err)
 	}
 
-	webhookInfo, err := bot.GetWebhookInfo()
-	if err != nil {
-		log.Printf("ПОМИЛКА отримання інформації про вебхук після встановлення: %v", err)
-		return fmt.Errorf("bot.GetWebhookInfo failed after setup: %w", err)
+	webhookInfo, errInfo := bot.GetWebhookInfo() 
+	if errInfo != nil {
+		log.Printf("ПОМИЛКА отримання інформації про вебхук після встановлення: %v", errInfo)
+		return fmt.Errorf("bot.GetWebhookInfo failed after setup: %w", errInfo)
 	}
 
 	if webhookInfo.IsSet() && webhookInfo.URL == fullWebhookURL {
