@@ -6,12 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
+	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-	// "github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Цей імпорт тут не потрібен, sheets.SpreadsheetsScope використовується в telegram.SetWebhook/InitBot, якщо там є логіка з sheets
-	// або в telegram.HandleUpdates, якщо sheetsService передається
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -31,21 +30,18 @@ func main() {
 		log.Fatal("Критична помилка: SPREADSHEET_ID не встановлено!")
 	}
 
-	bot, err := telegram.InitBot(cfg.BotToken)
+	bot, err := telegram.InitBot(cfg.BotToken) 
 	if err != nil {
 		log.Fatalf("Помилка ініціалізації бота: %v", err)
 	}
-	if bot == nil {
-		log.Fatal("Критична помилка: Не вдалося створити об'єкт бота (bot is nil).")
-	}
-
+	
 	var botUsername string = "[ім'я невідоме]"
-	// Після змін в InitBot, ми покладаємося на те, що він або повернув помилку,
-	// або bot.Self.ID має якесь значення (можливо 0, якщо GetMe не вдалося).
-	if bot.Self.ID != 0 {
+	// Згідно з оновленою InitBot, ми покладаємося на те, що вона або повернула помилку,
+	// або bot.Self.ID має якесь значення (можливо 0, що буде залоговано в InitBot).
+	if bot.Self.ID != 0 { 
 		botUsername = bot.Self.UserName
-	} else {
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. Username: '%s'.", bot.Self.UserName)
+	} else { 
+		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName з API: '%s'.", bot.Self.UserName)
 	}
 	log.Printf("Бот @%s ініціалізовано.", botUsername)
 
@@ -54,16 +50,16 @@ func main() {
 		webhookPath = "/" + webhookPath
 	}
 
-	// Виклик SetWebhook з параметрами URL, шлях, шлях до сертифіката
+	// Викликаємо telegram.SetWebhook з правильними аргументами, які очікує оновлена функція
 	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
 	if err != nil {
 		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v.", err)
 	}
 
 	ctx := appContext()
-	// sheets.SpreadsheetsScope має бути визначено в пакеті sheets
-	// або використовуйте gsheets.SpreadsheetsScope безпосередньо, якщо це те саме
-	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope) // Використовуємо gsheets.SpreadsheetsScope
+	// Використовуємо sheets.SpreadsheetsScope, якщо він визначений у вашому пакеті internal/sheets
+	// або gsheets.SpreadsheetsScope, якщо потрібно напряму з google.golang.org/api/sheets/v4
+	credentials, err := google.FindDefaultCredentials(ctx, sheets.SpreadsheetsScope) 
 	if err != nil {
 		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте GOOGLE_APPLICATION_CREDENTIALS.", err)
 	}
