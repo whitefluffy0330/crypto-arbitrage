@@ -1,4 +1,4 @@
-package telegram // Пакет той самий
+package telegram 
 
 import (
 	"fmt"
@@ -11,12 +11,12 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" 
-	gsheets "google.golang.org/api/sheets/v4" 
+	// gsheets "google.golang.org/api/sheets/v4" // Не потрібен, якщо srv це *sheets.Service
 )
 
-// HandleGoalInput тепер парсить лише суму та валюту.
-// Використовує FinancialGoal та SetUserGoal з telegram.go
-func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) { 
+// Тип FinancialGoal та функції SetUserGoal, GetUserGoal тепер в telegram.go
+
+func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *sheets.Service, cfg *config.Config) { // Змінено тип srv
 	chatID := message.Chat.ID
 	inputText := message.Text
 	log.Printf("Отримано текст для місячної цілі від чату %d: %s", chatID, inputText)
@@ -24,7 +24,7 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gshee
 	re := regexp.MustCompile(`^(\d+(?:\.\d{1,2})?)\s*([а-яА-Яa-zA-Z]{3})?$`)
 	matches := re.FindStringSubmatch(strings.TrimSpace(inputText))
 
-	var goal FinancialGoal // Тип FinancialGoal тепер з telegram.go
+	var goal FinancialGoal 
 	var parsedSuccessfully bool
 
 	if len(matches) >= 3 { 
@@ -33,9 +33,7 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gshee
 		amount, errAmount := strconv.ParseFloat(amountStr, 64)
 
 		if errAmount == nil {
-			if currencyStr == "" {
-				currencyStr = "UAH" 
-			}
+			if currencyStr == "" { currencyStr = "UAH" }
 			goal = FinancialGoal{
 				Amount:       amount,
 				Currency:     currencyStr,
@@ -49,49 +47,33 @@ func HandleGoalInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message, srv *gshee
 
 	var responseText string
 	if parsedSuccessfully {
-		err := SetUserGoal(chatID, goal, srv, cfg) // Функція SetUserGoal тепер з telegram.go
+		err := SetUserGoal(chatID, goal, srv, *cfg) // Передаємо *cfg, якщо SetUserGoal очікує config.Config
 		if err != nil {
-			responseText = fmt.Sprintf("⚠️ Помилка збереження цілі у Google Таблицю: %v", err)
+			responseText = fmt.Sprintf("⚠️ Помилка збереження цілі: %v", err)
 			log.Printf("Помилка SetUserGoal для ChatID %d: %v", chatID, err)
 		} else {
 			responseText = fmt.Sprintf(
-				"🎯 Чудово! Вашу ціль на поточний місяць встановлено:\n\n"+
-					"Сума: `%.2f %s`\n"+
-					"(Встановлено: `%s`)",
-				goal.Amount, goal.Currency, goal.SetDate.In(KyivLocation).Format("02.01.2006"), // Використовуємо KyivLocation з telegram.go
+				"🎯 Ціль встановлено:\nСума: `%.2f %s`\n(Дата: `%s`)",
+				goal.Amount, goal.Currency, goal.SetDate.In(KyivLocation).Format("02.01.2006"), 
 			)
-			log.Printf("Місячну ціль для чату %d успішно розпарсена та збережена: %+v", chatID, goal)
+			log.Printf("Місячну ціль для %d збережено: %+v", chatID, goal)
 		}
 	} else {
-		responseText = "⚠️ Не вдалося розпізнати формат цілі. Будь ласка, введіть лише суму та, опціонально, валюту (3 літери):\n\n"+
-		               "Наприклад: `15000 грн` або `500 USD`."
-		log.Printf("Помилка парсингу місячної цілі для чату %d: '%s'", chatID, inputText)
+		responseText = "⚠️ Не розпізнано формат цілі. Введіть: `СУМА ВАЛЮТА` (напр. `15000 грн`)."
+		log.Printf("Помилка парсингу цілі для %d: '%s'", chatID, inputText)
 	}
 
 	msg := tgbotapi.NewMessage(chatID, responseText)
 	msg.ParseMode = tgbotapi.ModeMarkdown 
-
 	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Помилка надсилання відповіді HandleGoalInput для чату %d: %v", chatID, err)
+		log.Printf("Помилка надсилання відповіді HandleGoalInput для %d: %v", chatID, err)
 	}
 }
 
-// Якщо у вас був файл internal/telegram/goal/goal.go з функцією HandleMyGoalCommand,
-// і вона потрібна, її можна залишити тут або перенести в handler.go.
-// Наприклад, якщо HandleMyGoalCommand була такою:
-/*
-func HandleMyGoalCommand(bot *tgbotapi.BotAPI, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "🎯 Введіть суму вашої цілі на поточний місяць (наприклад, `15000 ГРН` або `500 USD`). Валюта опціональна (за замовчуванням UAH).")
-	msg.ParseMode = tgbotapi.ModeMarkdown
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Помилка при відправці HandleMyGoalCommand (пакет telegram, файл goal.go): %v", err)
-	}
+// Функція HandleMyGoalCommand з вашого файлу goal/goal.go (відповідь #74)
+// Вона має бути тут, якщо викликається з handler.go як HandleMyGoalCommand
+func HandleMyGoalCommand(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *sheets.Service, cfg *config.Config) {
+    message := tgbotapi.NewMessage(msg.Chat.ID, "Введіть суму цілі, наприклад '1000 UAH'.")
+    bot.Send(message)
+    SetUserState(msg.Chat.ID, StateAwaitingGoalInput) // Встановлюємо стан
 }
-*/
-// Якщо HandleGoalCallback була у вашому файлі goal.go, вона може залишитися тут,
-// або її логіку потрібно перенести в handler.go.
-/*
-func HandleGoalCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery, srv *gsheets.Service, cfg config.Config) { 
-	// ... ваша логіка ...
-}
-*/
