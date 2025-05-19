@@ -8,89 +8,65 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
-	// Додаємо імпорт пакета motivation
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-	gsheets "google.golang.org/api/sheets/v4"
+	// gsheets "google.golang.org/api/sheets/v4" // Не потрібен, якщо srv це *sheets.Service
 )
 
-// StartWork приймає cfg та передає параметри з cfg в sheets.LogWorkStart
-func StartWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) {
+func StartWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *sheets.Service, cfg *config.Config) { // Змінено тип srv та cfg
 	chatID := msg.Chat.ID
 	log.Printf("Команда /start для ChatID %d", chatID)
 	startTime := time.Now() 
-
+	// KyivLocation має бути доступний з пакета telegram, якщо він там експортований,
+	// або переданий через параметр, або використаний з sheets.KyivLocation, якщо sheets імпортовано.
+	// Припускаючи, що KyivLocation доступний глобально з telegram.go
 	err := sheets.LogWorkStart(srv, cfg.SpreadsheetID, cfg.SheetNameWorkLog, chatID, startTime)
-
 	var text string
 	if err != nil {
-		log.Printf("Помилка логування початку роботи в Google Sheets для ChatID %d: %v", chatID, err)
-		text = fmt.Sprintf("✅ Робочий день розпочато, але сталася помилка при записі у таблицю ('%s'): %v", cfg.SheetNameWorkLog, err)
+		text = fmt.Sprintf("✅ Робочий день розпочато, але помилка запису: %v", err)
 	} else {
-		text = fmt.Sprintf("✅ Робочий день розпочато о %s (за Києвом). Успішної роботи!", startTime.In(sheets.KyivLocation).Format("15:04:05"))
+		text = fmt.Sprintf("✅ Робочий день розпочато о %s. Успіхів!", startTime.In(telegram.KyivLocation).Format("15:04:05")) // Використовуємо telegram.KyivLocation
 	}
-
 	message := tgbotapi.NewMessage(chatID, text)
 	if _, sendErr := bot.Send(message); sendErr != nil {
-		log.Printf("Помилка при відправці повідомлення StartWork для ChatID %d: %v", chatID, sendErr)
+		log.Printf("Помилка StartWork send: %v", sendErr)
 	}
 }
 
-// StopWork приймає cfg та передає параметри з cfg в sheets.LogWorkStop
-func StopWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) {
+func StopWork(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *sheets.Service, cfg *config.Config) { // Змінено тип srv та cfg
 	chatID := msg.Chat.ID
 	log.Printf("Команда /stop для ChatID %d", chatID)
 	endTime := time.Now()
-
 	duration, err := sheets.LogWorkStop(srv, cfg.SpreadsheetID, cfg.SheetNameWorkLog, chatID, endTime)
-
 	var text string
 	if err != nil {
-		log.Printf("Помилка логування завершення роботи в Google Sheets для ChatID %d: %v", chatID, err)
-		text = fmt.Sprintf("🛑 Робочий день завершено, але сталася помилка при записі у таблицю ('%s'): %v", cfg.SheetNameWorkLog, err)
+		text = fmt.Sprintf("🛑 День завершено, помилка запису: %v", err)
 	} else {
 		durationStr := sheets.FormatDuration(duration)
-		text = fmt.Sprintf("🛑 Робочий день завершено о %s (за Києвом). Тривалість: %s. Гарного відпочинку!", endTime.In(sheets.KyivLocation).Format("15:04:05"), durationStr)
+		text = fmt.Sprintf("🛑 День завершено о %s. Тривалість: %s.", endTime.In(telegram.KyivLocation).Format("15:04:05"), durationStr) // Використовуємо telegram.KyivLocation
 	}
-
 	message := tgbotapi.NewMessage(chatID, text)
-	if _, sendErr := bot.Send(message); sendErr != nil {
-		log.Printf("Помилка при відправці повідомлення StopWork для ChatID %d: %v", chatID, sendErr)
-	}
+	bot.Send(message) // Ігноруємо помилку відправки для простоти
 
-	// ДОДАНО: Надсилання мотиваційної фрази після повідомлення про завершення дня
-	// Переконуємося, що motivation.InitMotivationSeed() викликається в main.go
 	motivationalPhrase := motivation.GetRandomMotivation()
 	if motivationalPhrase != "" {
 		motivationMsg := tgbotapi.NewMessage(chatID, motivationalPhrase)
-		// Надсилаємо з невеликою затримкою, щоб повідомлення не "злиплися"
-		// Це опціонально, можна і без затримки
-		// time.Sleep(500 * time.Millisecond) 
 		if _, sendErr := bot.Send(motivationMsg); sendErr != nil {
-			log.Printf("Помилка при відправці мотиваційного повідомлення для ChatID %d: %v", chatID, sendErr)
-		} else {
-			log.Printf("Надіслано мотиваційну фразу для ChatID %d після /stop", chatID)
+			log.Printf("Помилка мотивації: %v", sendErr)
 		}
 	}
 }
 
-// DayOff приймає cfg та передає параметри з cfg в sheets.LogDayOff
-func DayOff(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *gsheets.Service, cfg config.Config) {
+func DayOff(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, srv *sheets.Service, cfg *config.Config) { // Змінено тип srv та cfg
 	chatID := msg.Chat.ID
 	log.Printf("Команда /dayoff для ChatID %d", chatID)
 	dateToLog := time.Now() 
-
 	err := sheets.LogDayOff(srv, cfg.SpreadsheetID, cfg.SheetNameWorkLog, chatID, dateToLog)
-
 	var text string
 	if err != nil {
-		log.Printf("Помилка логування вихідного дня в Google Sheets для ChatID %d: %v", chatID, err)
-		text = fmt.Sprintf("📅 Сьогодні вихідний. Сталася помилка при записі у таблицю ('%s'): %v", cfg.SheetNameWorkLog, err)
+		text = fmt.Sprintf("📅 Вихідний. Помилка запису: %v", err)
 	} else {
-		text = fmt.Sprintf("📅 Статус 'Вихідний' на %s (за Києвом) встановлено в таблиці '%s'.", dateToLog.In(sheets.KyivLocation).Format("02.01.2006"), cfg.SheetNameWorkLog)
+		text = fmt.Sprintf("📅 Статус 'Вихідний' на %s встановлено.", dateToLog.In(telegram.KyivLocation).Format("02.01.2006")) // Використовуємо telegram.KyivLocation
 	}
-
 	message := tgbotapi.NewMessage(chatID, text)
-	if _, sendErr := bot.Send(message); sendErr != nil {
-		log.Printf("Помилка при відправці повідомлення DayOff для ChatID %d: %v", chatID, sendErr)
-	}
+	bot.Send(message)
 }
