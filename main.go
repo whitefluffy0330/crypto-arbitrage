@@ -1,89 +1,70 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
-	"strings"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" 
+	// "strings" // Не використовується напряму тут
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/config"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/sheets"
+	gsheetsService "github.com/whitefluffy0330/crypto-arbitrage/internal/sheets" // Використовуємо інший аліас, щоб уникнути конфлікту з gsheets
 	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram"
-	"github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation"
-
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/option"
-	gsheets "google.golang.org/api/sheets/v4"
+	// "github.com/whitefluffy0330/crypto-arbitrage/internal/telegram/motivation" // Закоментовано, якщо InitMotivationSeed не потрібен або викликається деінде
+	// "golang.org/x/oauth2/google" // Не використовується напряму тут
+	// "google.golang.org/api/option" // Не використовується напряму тут
+	// gsheets "google.golang.org/api/sheets/v4" // Аліас gsheets вже не потрібен тут
 )
 
-func appContext() context.Context { return context.Background() }
+// func appContext() context.Context { return context.Background() } // Не використовується напряму тут
 
 func main() {
-	motivation.InitMotivationSeed()
-	cfg := config.LoadEnv()
+	// motivation.InitMotivationSeed() // Якщо InitMotivationSeed потрібен, розкоментуйте та переконайтеся, що пакет motivation імпортовано
+	
+	cfg, err := config.LoadEnv()
+	if err != nil {
+		log.Fatalf("Config load error: %v", err)
+	}
 
-	if cfg.BotToken == "" {
+	// Перевірка обов'язкових змінних з вашого оригінального main.go
+	if cfg.TelegramToken == "" {
 		log.Fatal("Критична помилка: TELEGRAM_TOKEN не встановлено!")
 	}
-	if cfg.SpreadsheetID == "" {
+	if cfg.SpreadsheetID == "" { // Це з вашого config.go
 		log.Fatal("Критична помилка: SPREADSHEET_ID не встановлено!")
 	}
+	// if cfg.AdminChatID == 0 { // З вашого config.go, якщо це обов'язково
+	// 	log.Fatal("Критична помилка: TELEGRAM_CHAT_ID не встановлено або 0!")
+	// }
 
-	bot, err := telegram.InitBot(cfg.BotToken) 
+
+	svc, err := gsheetsService.NewService(cfg) // Використовуємо gsheetsService.NewService
 	if err != nil {
-		log.Fatalf("Помилка ініціалізації бота: %v", err)
-	}
-	
-	var botUsername string = "[ім'я невідоме]"
-	// Припускаємо, що InitBot або заповнив bot.Self.ID, або ми використовуємо тимчасове ім'я
-	if bot.Self.ID != 0 { 
-		botUsername = bot.Self.UserName
-	} else { 
-		log.Printf("ПОПЕРЕДЖЕННЯ (main.go): bot.Self.ID == 0 після InitBot. UserName: '%s'.", bot.Self.UserName)
-	}
-	log.Printf("Бот @%s ініціалізовано.", botUsername)
-
-	webhookPath := cfg.WebhookPath
-	if !strings.HasPrefix(webhookPath, "/") && webhookPath != "" {
-		webhookPath = "/" + webhookPath
+		log.Fatalf("Sheets init error: %v", err)
 	}
 
-	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, webhookPath, cfg.WebhookCertPath)
+	bot, err := telegram.InitBot(cfg) // Передаємо *config.Config
 	if err != nil {
-		log.Printf("ПОПЕРЕДЖЕННЯ/ПОМИЛКА встановлення вебхука: %v.", err)
+		log.Fatalf("Telegram init error: %v", err)
 	}
 
-	ctx := appContext()
-	credentials, err := google.FindDefaultCredentials(ctx, gsheets.SpreadsheetsScope) // Використовуємо gsheets.SpreadsheetsScope
+	// Згідно з вашим main.go, SetWebhook приймає (bot, certPath, url)
+	// hook := cfg.WebhookBaseURL + cfg.WebhookPath // Це було у вас
+	// if err := telegram.SetWebhook(bot, cfg.WebhookCertPath, hook); err != nil {
+	// АЛЕ telegram.SetWebhook тепер приймає (bot, webhookBaseURL, webhookPath, certFilePath)
+	err = telegram.SetWebhook(bot, cfg.WebhookBaseURL, cfg.WebhookPath, cfg.WebhookCertPath)
 	if err != nil {
-		log.Fatalf("Помилка авторизації Google Sheets (FindDefaultCredentials): %v. Перевірте GOOGLE_APPLICATION_CREDENTIALS.", err)
+		log.Fatalf("Webhook set error: %v", err) // Змінено на Fatalf, як у вашому main.go
 	}
 
-	sheetsService, err := gsheets.NewService(ctx, option.WithCredentials(credentials))
-	if err != nil {
-		log.Fatalf("Не вдалося створити клієнт Google Sheets: %v", err)
-	}
-	log.Println("Клієнт Google Sheets успішно створено.")
+	go func() {
+		// bot.ListenForWebhook(cfg.WebhookPath) повертає UpdatesChannel, його результат має бути переданий в HandleUpdates
+		// http.HandleFunc(cfg.WebhookPath, bot.ListenForWebhook) - так не працює, бо ListenForWebhook не є http.HandlerFunc
+		// Правильний спосіб - передати nil як другий аргумент в ListenAndServe,
+		// а ListenForWebhook має зареєструвати свій обробник на DefaultServeMux.
+		// Це вже реалізовано в telegram.HandleUpdates через bot.ListenForWebhook()
+		log.Printf("Listening for webhook on %s (шлях %s)", cfg.WebhookListenAddr, cfg.WebhookPath)
+		if err := http.ListenAndServe(cfg.WebhookListenAddr, nil); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
 
-	var updatesChannel tgbotapi.UpdatesChannel
-	if webhookPath != "" {
-		updatesChannel = bot.ListenForWebhook(webhookPath)
-		go func() {
-			log.Printf("Запуск HTTP сервера для вебхука на '%s', шлях: %s", cfg.WebhookListenAddr, webhookPath)
-			err_http := http.ListenAndServe(cfg.WebhookListenAddr, nil)
-			if err_http != nil {
-				log.Fatalf("КРИТИЧНА ПОМИЛКА ЗАПУСКУ HTTP СЕРВЕРА: %v", err_http)
-			}
-		}()
-		log.Printf("Бот @%s готовий до роботи (слухає на %s, очікує запити від Nginx на %s)...", botUsername, cfg.WebhookListenAddr, webhookPath)
-	} else {
-		log.Println("ПОПЕРЕДЖЕННЯ: WebhookPath не вказано. Вебхук не слухається.")
-	}
-
-	if updatesChannel != nil {
-		telegram.HandleUpdates(updatesChannel, bot, sheetsService, cfg)
-	} else {
-		log.Println("Канал оновлень не ініціалізовано. Зупинка.")
-	}
+	telegram.HandleUpdates(bot, svc, cfg) // svc має бути *sheets.Service
 }
